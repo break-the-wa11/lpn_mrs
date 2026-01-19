@@ -1,0 +1,17 @@
+# Ignore SLURM job output files
+*.slurm
+
+# Ignore output files
+*.out
+
+# Ignore weights directory
+weights/
+
+# Ignore Python cache directories
+*/__pycache__/
+
+# Ignore savings directory
+savings/
+
+# Ignore all data directories
+data/
