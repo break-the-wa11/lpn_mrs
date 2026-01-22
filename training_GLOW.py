@@ -32,7 +32,7 @@ parser.add_argument("--batch_size", type=int, default=None)
 args = parser.parse_args()
 
 ###############################################################################
-savestr = f"weights/glow_mrs_5"
+savestr = f"weights/glow_mrs_1"
 if not os.path.isdir("weights"):
     os.mkdir("weights")
 if not os.path.isdir(savestr):

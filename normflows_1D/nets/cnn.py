@@ -63,5 +63,5 @@ class ConvNet1d(nn.Module):
 
     def forward(self, x):
         x = self.net(x)
-        x = 5 * torch.tanh(x)
+        x = 3 * torch.tanh(x)
         return x

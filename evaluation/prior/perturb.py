@@ -25,7 +25,7 @@ def perturb_generator(n_samples, perturb_arg, raw_data_dir, save_dir):
         for idx in random_indices:
             samples.append(dataset[idx])
 
-        samples = np.array(samples)
+        samples = np.array(samples).astype(np.float32)
         np.save(os.path.join(save_dir, f"lipid.npy"), samples)
     else:
         dataset = MRSDataset(root='data/', split='test', data_type='metab')
@@ -71,7 +71,7 @@ def perturb_generator(n_samples, perturb_arg, raw_data_dir, save_dir):
             
             samples.append(noisy_sample)
 
-        samples = np.array(samples)
+        samples = np.array(samples).astype(np.float32)
         if perturb_arg['perturb_mode'] == 'gaussian':
             np.save(os.path.join(save_dir, f"gaussian_{perturb_arg['parameters']['sigma']}.npy"), samples)
         else:

@@ -8,7 +8,7 @@ import argparse
 def get_GLOW_hyperparameters():
     args = argparse.Namespace()
 
-    args.num_steps = 3000
+    args.num_steps = 20000
     args.validate_every_n_steps = 200
     args.lr = 1e-4
 

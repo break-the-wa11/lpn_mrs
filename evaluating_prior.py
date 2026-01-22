@@ -71,7 +71,7 @@ if model_name == "LPN":
     )
     model.load_state_dict(torch.load(f"weights/lpn_mrs_kernel_{args.kernel}_noise_{args.noise_level}/LPN_best.pt"))
 elif model_name == "GLOW":
-    savestr = f"savings/glow_mrs"
+    savestr = f"savings/glow_mrs_3"
     model = GLOW(
         L=3,
         K=16,
@@ -80,7 +80,7 @@ elif model_name == "GLOW":
         split_mode='channel',
         scale=True,
     )
-    model.load_state_dict(torch.load(f"weights/glow_mrs/GLOW_best.pt"))
+    model.load_state_dict(torch.load(f"weights/glow_mrs_3/GLOW_best.pt"))
 else:
     raise ValueError("Unknown model!")
 
