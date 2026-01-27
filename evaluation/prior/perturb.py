@@ -28,7 +28,7 @@ def perturb_generator(n_samples, perturb_arg, raw_data_dir, save_dir):
         samples = np.array(samples).astype(np.float32)
         np.save(os.path.join(save_dir, f"lipid.npy"), samples)
     else:
-        dataset = MRSDataset(root='data/', split='test', data_type='metab')
+        dataset = MRSDataset(root=raw_data_dir, split='test', data_type='metab')
         n_samples = min(n_samples, len(dataset))
         random_indices = random.sample(range(len(dataset)), n_samples)
 

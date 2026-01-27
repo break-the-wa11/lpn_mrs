@@ -1,3 +1,5 @@
 from .hyperparameters_LPN import get_LPN_hyperparameters
 from .hyperparameters_GLOW import get_GLOW_hyperparameters
 from .hyperparameters_perturb import get_perturb_hyperparameters
+from .hyperparameters_denoise import get_denoise_hyperparameters
+from .hyperparameters_wv import get_wv_hyperparameters

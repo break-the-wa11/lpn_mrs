@@ -14,6 +14,6 @@ def get_LPN_hyperparameters():
     args.pretrain_lr = 1e-3
     args.num_stages = 3
     args.gamma_init = 0.1
-    args.lr = 1e-3
+    args.lr = 1e-4
 
     return args

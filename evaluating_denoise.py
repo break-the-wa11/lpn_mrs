@@ -1,5 +1,5 @@
 """
-Evaluate sample for models
+Evaluate prior for models
 """
 
 import argparse
@@ -8,9 +8,8 @@ import logging
 import os
 import torch
 
-from datasets import MRSDataset
 from networks import LPN, GLOW
-from evaluation import eval_sample
+from evaluation import eval_denoise
 
 if torch.backends.mps.is_available():
     # mps backend is used in Apple Silicon chips
@@ -26,7 +25,7 @@ parser.add_argument(
     "--data_dir",
     type=str,
     default="data/",
-    help="Root directory of true dataset."
+    help="Root directory of raw dataset.",
 )
 parser.add_argument(
     "--model_name",
@@ -38,9 +37,6 @@ parser.add_argument(
 )
 parser.add_argument(
     "--noise_level", type=float, default=0.01, help="Noise level for training"
-)
-parser.add_argument(
-    "--max_iter", type=int, default=500, help="Number of steps for sampling"
 )
 parser.add_argument(
     "--n_samples", 
@@ -58,7 +54,6 @@ n_samples = args.n_samples
 if model_name == "LPN":
     kernel = args.kernel
     noise_level = args.noise_level
-    max_iter = args.max_iter
     savestr = f"savings/lpn_mrs_kernel_{args.kernel}_noise_{args.noise_level}"
     model = LPN(
         in_dim=1,
@@ -68,10 +63,6 @@ if model_name == "LPN":
         alpha=1e-6
     )
     model.load_state_dict(torch.load(f"weights/lpn_mrs_kernel_{args.kernel}_noise_{args.noise_level}/LPN_best.pt"))
-    sample_param = {'model_name': model_name,
-                   'noise_level': noise_level,
-                   'max_iter': max_iter,
-                   'n_samples': n_samples}
 elif model_name == "GLOW":
     savestr = f"savings/glow_mrs_1"
     model = GLOW(
@@ -83,8 +74,6 @@ elif model_name == "GLOW":
         scale=True,
     )
     model.load_state_dict(torch.load(f"weights/glow_mrs_1/GLOW_best.pt"))
-    sample_param = {'model_name': model_name,
-                    'n_samples': n_samples}
 else:
     raise ValueError("Unknown model!")
 
@@ -97,26 +86,22 @@ if not os.path.isdir(savestr):
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
-    filename=f"{savestr}/sample_" + str(datetime.datetime.now()) + ".log",
+    filename=f"{savestr}/denoise_" + str(datetime.datetime.now()) + ".log",
     level=logging.INFO,
     format="%(asctime)s: %(message)s",
 )
 
 ###############################################################################
-# Create dataset
-true_dataset = MRSDataset(data_dir, split="train")
-benchmark_dataset = MRSDataset(data_dir, split="validate")
-
-###############################################################################
 # Evaluation
 ###############################################################################
 
-eval_sample(
+eval_denoise(
     model=model,
-    true_dataset=true_dataset,
-    benchmark_dataset=benchmark_dataset,
-    sample_param=sample_param,
+    model_type=model_name,
     device=device,
-    savestr=savestr,
+    n_samples=n_samples,
+    data_dir=data_dir,
+    savestr=f"{savestr}/denoise/",
     logger=logger
 )
+logger.info("Evaluation finished.")

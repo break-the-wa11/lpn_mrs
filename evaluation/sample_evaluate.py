@@ -8,15 +8,14 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from evaluation.sample import compute_stat, fid, GMM_sample
+from evaluation.sample import compute_stat, fid, GMM_sample, LPN_sample, GLOW_sample
 
 def eval_sample(
     model,
     true_dataset,
     benchmark_dataset,
-    model_type: str = "GLOW",
+    sample_param,
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
-    n_samples: int = 30,
     savestr: str = "savings",
     logger=None,
 ):
@@ -26,36 +25,39 @@ def eval_sample(
     Args:
         true_dataset: dataset for true distribution
         benchmark_dataset: dataset for benchmark distribution
-        model_type: "LPN" or "GLOW"
+        sample_param: dict containing model-specific parameters for sampling.
         device: Device to run the evaluation on.
-        n_samples: number of samples to generate if necessary.
         savestr: Directory to save the perturbed results.
         logger: Logger for logging evaluation progress.
     """
     sample_path = os.path.join(savestr, 'sample.npy')
+
+    true_sample = np.array([true_dataset[i] for i in range(len(true_dataset))])
+    bm_sample = np.array([benchmark_dataset[i] for i in range(len(benchmark_dataset))])
 
     if not os.path.isfile(sample_path):
         os.makedirs(savestr, exist_ok=True)
         model.eval()
         model = model.to(device)
 
-        if model_type == 'GLOW':
-            with torch.no_grad():
-                sample, _ = model.sample(n_samples)
-                sample = sample.squeeze(1).cpu().numpy()
-        elif model_type == 'LPN':
-            pass
+        if sample_param['model_name'] == 'GLOW':
+            sample = GLOW_sample(n_samples, model)
+        elif sample_param['model_name'] == 'LPN':
+            sample = LPN_sample(data=true_sample,
+                                model=model,
+                                device=device,
+                                savestr=savestr,
+                                n_samples=sample_param['n_samples'],
+                                sigma=sample_param['noise_level'],
+                                max_iter=sample_param['max_iter'])
         else:
-            raise ValueError(f"Unknown model type: {model_type}")
+            raise ValueError(f"Unknown model type!")
         
         np.save(sample_path, sample)
-        plot(sample, model_type, savestr)
+        plot(sample, sample_param['model_name'], savestr)
 
     sample = np.load(sample_path)
     n_samples = sample.shape[0]
-
-    true_sample = np.array([true_dataset[i] for i in range(len(true_dataset))])
-    bm_sample = np.array([benchmark_dataset[i] for i in range(len(benchmark_dataset))])
 
     gmm_sample = GMM_sample(true_sample, n_samples)
 
@@ -66,7 +68,7 @@ def eval_sample(
 
     fid_sample = fid(mu_sample, sigma_sample, mu_true, sigma_true)
     if logger is not None:
-        logger.info(f"{model_type} fid: {fid_sample}")
+        logger.info(f"{sample_param['model_name']} fid: {fid_sample}")
 
     fid_bm = fid(mu_bm, sigma_bm, mu_true, sigma_true)
     if logger is not None:
