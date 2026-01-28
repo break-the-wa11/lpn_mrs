@@ -32,20 +32,28 @@ parser.add_argument(
     "--kernel", type=int, default=101, help="Kernel size for LPN layer."
 )
 parser.add_argument(
-    "--noise_level", type=float, default=0.01, help="Noise level for training"
+    "--noise_min", type=float, default=0.001, help="Min Noise level for training"
+)
+parser.add_argument(
+    "--noise_max", type=float, default=0.03, help="Max Noise level for training"
+)
+parser.add_argument(
+    "--noise_val", type=float, default=0.01, help="Noise level for validation"
 )
 parser.add_argument("--batch_size", type=int, default=None)
 args = parser.parse_args()
 
 ###############################################################################
-savestr = f"weights/lpn_mrs_kernel_{args.kernel}_noise_{args.noise_level}"
+savestr = f"weights/lpn_mrs_kernel_{args.kernel}_noise_({args.noise_min}_{args.noise_max})"
 if not os.path.isdir("weights"):
     os.mkdir("weights")
 if not os.path.isdir(savestr):
     os.mkdir(savestr)
 
 kernel = args.kernel
-noise_level = args.noise_level
+noise_min = args.noise_min
+noise_max = args.noise_max
+noise_val = args.noise_val
 batch_size = 64 if args.batch_size is None else args.batch_size
 hyper_params = get_LPN_hyperparameters()
 
@@ -72,7 +80,7 @@ val_dataloader = torch.utils.data.DataLoader(
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
-    filename=f"{savestr}/log_training_lpn_mrs_kernel_{args.kernel}_noise_{args.noise_level}_" + str(datetime.datetime.now()) + ".log",
+    filename=f"{savestr}/log_training_lpn_mrs_kernel_{args.kernel}_noise_({args.noise_min}_{args.noise_max})_" + str(datetime.datetime.now()) + ".log",
     level=logging.INFO,
     format="%(asctime)s: %(message)s",
 )
@@ -94,7 +102,8 @@ lpn_training(
     train_dataloader=train_dataloader,
     val_dataloader=val_dataloader,
     device=device,
-    sigma_noise=noise_level,
+    sigma_noise= (noise_min, noise_max),
+    sigma_val = noise_val,
     num_steps=hyper_params.num_steps,
     validate_every_n_steps=hyper_params.validate_every_n_steps,
     num_steps_pretrain=hyper_params.num_steps_pretrain,

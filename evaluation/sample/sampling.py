@@ -20,7 +20,8 @@ def LPN_sample(data,
                model, 
                device, 
                savestr,
-               sigma = 0.01, 
+               sigma_min = 0.001, 
+               sigma_max = 0.03,
                max_iter = 500):
     """Sample from lpn using Langevin Dynamics"""
     x = np.mean(data, axis = 0)
@@ -28,6 +29,7 @@ def LPN_sample(data,
 
     sample_all = []
     for it in range(max_iter):
+        sigma = sigma_max - (sigma_max - sigma_min) * (it / max_iter)
         n = torch.randn_like(x) * sigma * np.sqrt(2)
         x = model(x + n)
 

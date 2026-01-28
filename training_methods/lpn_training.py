@@ -20,7 +20,8 @@ def lpn_training(
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
     num_steps: int = 40000,
     optimizer: str = "adam",
-    sigma_noise: float = 0.01,
+    sigma_noise: tuple = (0.001, 0.03),
+    sigma_val: float = 0.01,
     validate_every_n_steps: int = 1000,
     num_steps_pretrain: int = 20000,
     num_stages: int = 4,
@@ -41,6 +42,7 @@ def lpn_training(
         num_steps: Total number of training iterations.
         optimizer: Optimizer to use.
         sigma_noise: noise std in prox matching.
+        sigma_val: noise std in validation.
         validate_every_n_steps: Frequency of validation.
         num_steps_pretrain: Number of iterations for L1 loss pretraining.
         num_stages: Number of stages in prox matching loss schedule.
@@ -64,7 +66,7 @@ def lpn_training(
     elif optimizer == "sgd":
         optimizer = torch.optim.SGD(model.parameters())
 
-    validator = Validator(val_dataloader, sigma_noise, logger)
+    validator = Validator(val_dataloader, sigma_val, logger)
 
     global_step = 0
     progress_bar = tqdm(total=num_steps, dynamic_ncols=True)
@@ -73,28 +75,26 @@ def lpn_training(
     loss_monitor = []
     best_val_loss_mse = float('inf')
 
-    if loss_type == "pm":
-        args = argparse.Namespace()
-        args.num_steps = num_steps
-        args.num_steps_pretrain = num_steps_pretrain
-        args.num_stages = num_stages
-        args.gamma_init = gamma_init
-        args.pretrain_lr = pretrain_lr
-        args.lr = lr
+    if loss_type == "l2":
+        loss_hparams, lr = {"type": "l2"}, lr
+    elif loss_type == "l1":
+        loss_hparams, lr = {"type": "l1"}, lr
+    elif loss_type == "pm":
+        if num_steps_pretrain > 0:
+            loss_hparams, lr = {"type": "l1"}, pretrain_lr
+        else:
+            loss_hparams, lr = {"type": "prox_matching", "gamma": gamma_init}, lr
+
+        num_steps_per_stage = (num_steps - num_steps_pretrain) // num_stages
+        stage_transition_steps = [num_steps_pretrain + i * num_steps_per_stage for i in range(1, num_stages)] 
+
+        lr_init = lr
+    else:
+        raise NotImplementedError
 
     while True:
         for step, batch in enumerate(train_dataloader):
             model.train()
-
-            # get loss hyperparameters and learning rate
-            if loss_type == "l2":
-                loss_hparams, lr = {"type": "l2"}, lr
-            elif loss_type == "l1":
-                loss_hparams, lr = {"type": "l1"}, lr
-            elif loss_type == "pm":
-                loss_hparams, lr = get_loss_hparams_and_lr(args, global_step)
-            else:
-                raise NotImplementedError
 
             # get loss
             loss_func = get_loss(loss_hparams)
@@ -113,15 +113,22 @@ def lpn_training(
             progress_bar.update(1)
             progress_bar.set_postfix(**logs)
 
-            if loss_type == "pm" and global_step > args.num_steps_pretrain and loss > 1 - 1e-3:
-                # Instability detected, reduce lr and reload best model
-                args.lr /= 10
-                if args.lr < 1e-6:
-                    global_step = num_steps  # to break outer loop
-                    break
-                model.load_state_dict(
-                    torch.load(os.path.join(savestr, f"LPN_best.pt"))
-                )
+            if loss_type == "pm" and global_step >= num_steps_pretrain:
+                if global_step == num_steps_pretrain:
+                    loss_hparams, lr = {"type": "prox_matching", "gamma": gamma_init}, lr_init
+                    gamma = gamma_init
+                    stage_loss_min = float('inf')
+                
+                if global_step in stage_transition_steps:
+                    lr = lr_init
+                    gamma /= 2
+                    stage_loss_min = float('inf')
+                    loss_hparams["gamma"] = gamma
+                if loss > stage_loss_min + 0.01 or loss > 1 - 1e-3:
+                    lr /= 10
+                    model.load_state_dict(
+                        torch.load(os.path.join(savestr, f"LPN_best.pt"))
+                    )
                 
             if logger is not None:
                 logger.info(
@@ -167,7 +174,8 @@ def lpn_training(
 def train_step(model, optimizer, batch, loss_func, sigma_noise, device):
     target = torch.tensor(batch).unsqueeze(1).to(device)
     noise = torch.randn_like(target)
-    input = target + noise * sigma_noise
+    noise_levels = torch.empty(target.size(0)).uniform_(*sigma_noise)
+    input = target + noise * noise_levels.view(-1,1,1)
     output = model(input)
 
     loss = loss_func(output, target)
@@ -260,34 +268,33 @@ class Validator:
 ##########################
 # Utils for loss function
 ##########################
-def get_loss_hparams_and_lr(args, global_step):
-    """Get loss hyperparameters and learning rate based on training schedule.
-    Parameters:
-        args (argparse.Namespace): Arguments from command line.
-        global_step (int): Current training step.
-    """
-    if global_step < args.num_steps_pretrain:
-        loss_hparams, lr = {"type": "l1"}, args.pretrain_lr
-    else:
-        num_steps = args.num_steps - args.num_steps_pretrain
-        step = global_step - args.num_steps_pretrain
+# def get_loss_hparams_and_lr(args, global_step):
+#     """Get loss hyperparameters and learning rate based on training schedule.
+#     Parameters:
+#         args (argparse.Namespace): Arguments from command line.
+#         global_step (int): Current training step.
+#     """
+#     if global_step < args.num_steps_pretrain:
+#         loss_hparams, lr = {"type": "l1"}, args.pretrain_lr
+#     else:
+#         num_steps = args.num_steps - args.num_steps_pretrain
+#         step = global_step - args.num_steps_pretrain
 
-        def _get_loss_hparams_and_lr(num_steps, step):
-            num_steps_per_stage = num_steps // args.num_stages
-            stage = step // num_steps_per_stage
-            if stage >= args.num_stages:
-                stage = args.num_stages - 1
-            loss_hparams = {
-                "type": "prox_matching",  # proximal matching
-                "gamma": args.gamma_init / (2 ** stage),
-            }
-            lr = args.lr
-            return loss_hparams, lr
+#         def _get_loss_hparams_and_lr(num_steps, step):
+#             num_steps_per_stage = num_steps // args.num_stages
+#             stage = step // num_steps_per_stage
+#             if stage >= args.num_stages:
+#                 stage = args.num_stages - 1
+#             loss_hparams = {
+#                 "type": "prox_matching",  # proximal matching
+#                 "gamma": args.gamma_init / (2 ** stage),
+#             }
+#             lr = args.lr
+#             return loss_hparams, lr
         
-        loss_hparams, lr = _get_loss_hparams_and_lr(num_steps, step)
-        print("Changed lr: ", lr)
+#         loss_hparams, lr = _get_loss_hparams_and_lr(num_steps, step)
 
-    return loss_hparams, lr
+#     return loss_hparams, lr
 
 
 def get_loss(loss_hparams):

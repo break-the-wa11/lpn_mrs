@@ -48,7 +48,8 @@ def eval_sample(
                                 device=device,
                                 savestr=savestr,
                                 n_samples=sample_param['n_samples'],
-                                sigma=sample_param['noise_level'],
+                                sigma_min=sample_param['noise_min'],
+                                sigma_max=sample_param['noise_max'],
                                 max_iter=sample_param['max_iter'])
         else:
             raise ValueError(f"Unknown model type!")

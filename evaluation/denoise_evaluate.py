@@ -79,7 +79,7 @@ def eval_denoise(
                     f"Gaussian {sigma} denoise: "
                 )
                 logger.info(
-                    f"wvelet improvement: {wv_improvement}, {model_type} improvement: {model_improvement}"
+                    f"wavelet improvement: {wv_improvement}, {model_type} improvement: {model_improvement}"
                 )
 
             wv_imp_list.append(wv_improvement)
