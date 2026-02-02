@@ -37,13 +37,22 @@ parser.add_argument(
     "--kernel", type=int, default=101, help="Kernel size for LPN layer."
 )
 parser.add_argument(
+    "--hidden", type=int, default=128, help="Hidden dim for LPN layer."
+)
+parser.add_argument(
     "--noise_min", type=float, default=0.001, help="Min noise level during training"
 )
 parser.add_argument(
     "--noise_max", type=float, default=0.03, help="Max noise level during training"
 )
 parser.add_argument(
-    "--max_iter", type=int, default=100, help="Number of steps for sampling"
+    "--sample_min", type=float, default=0.01, help="Min noise level during sampling"
+)
+parser.add_argument(
+    "--sample_max", type=float, default=0.03, help="Max noise level during sampling"
+)
+parser.add_argument(
+    "--max_iter", type=int, default=500, help="Number of steps for sampling"
 )
 parser.add_argument(
     "--n_samples", 
@@ -60,21 +69,24 @@ n_samples = args.n_samples
 
 if model_name == "LPN":
     kernel = args.kernel
+    hidden = args.hidden
     noise_min = args.noise_min
     noise_max = args.noise_max
+    sample_min = args.sample_min
+    sample_max = args.sample_max
     max_iter = args.max_iter
-    savestr = f"savings/lpn_mrs_kernel_{args.kernel}_noise_({args.noise_min}_{args.noise_max})"
+    savestr = f"savings/lpn_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})"
     model = LPN(
         in_dim=1,
-        hidden=128,
+        hidden=hidden,
         kernel=kernel,
         beta=10,
         alpha=1e-6
     )
-    model.load_state_dict(torch.load(f"weights/lpn_mrs_kernel_{args.kernel}_noise_({args.noise_min}_{args.noise_max})/LPN_best.pt"))
+    model.load_state_dict(torch.load(f"weights/lpn_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})/LPN_best.pt"))
     sample_param = {'model_name': model_name,
-                   'noise_min': noise_min,
-                   'noise_max': noise_max,
+                   'noise_min': sample_min,
+                   'noise_max': sample_max,
                    'max_iter': max_iter,
                    'n_samples': n_samples}
 elif model_name == "GLOW":

@@ -42,7 +42,13 @@ parser.add_argument(
     "--kernel", type=int, default=101, help="Kernel size for LPN layer."
 )
 parser.add_argument(
-    "--noise_level", type=float, default=0.01, help="Noise level for training"
+    "--hidden", type=int, default=128, help="Hidden dim for LPN layer."
+)
+parser.add_argument(
+    "--noise_min", type=float, default=0.001, help="Min noise level for training"
+)
+parser.add_argument(
+    "--noise_max", type=float, default=0.03, help="Max noise level for training"
 )
 parser.add_argument(
     "--n_samples", 
@@ -60,16 +66,16 @@ n_samples = args.n_samples
 
 if model_name == "LPN":
     kernel = args.kernel
-    noise_level = args.noise_level
-    savestr = f"savings/lpn_mrs_kernel_{args.kernel}_noise_{args.noise_level}"
+    hidden = args.hidden
+    savestr = f"savings/lpn_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})"
     model = LPN(
         in_dim=1,
-        hidden=128,
+        hidden=hidden,
         kernel=kernel,
         beta=10,
         alpha=1e-6
     )
-    model.load_state_dict(torch.load(f"weights/lpn_mrs_kernel_{args.kernel}_noise_{args.noise_level}/LPN_best.pt"))
+    model.load_state_dict(torch.load(f"weights/lpn_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})/LPN_best.pt"))
 elif model_name == "GLOW":
     savestr = f"savings/glow_mrs_1"
     model = GLOW(

@@ -32,6 +32,9 @@ parser.add_argument(
     "--kernel", type=int, default=101, help="Kernel size for LPN layer."
 )
 parser.add_argument(
+    "--hidden", type=int, default=128, help="Hidden dim for LPN layer."
+)
+parser.add_argument(
     "--noise_min", type=float, default=0.001, help="Min Noise level for training"
 )
 parser.add_argument(
@@ -44,13 +47,14 @@ parser.add_argument("--batch_size", type=int, default=None)
 args = parser.parse_args()
 
 ###############################################################################
-savestr = f"weights/lpn_mrs_kernel_{args.kernel}_noise_({args.noise_min}_{args.noise_max})"
+savestr = f"weights/lpn_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})"
 if not os.path.isdir("weights"):
     os.mkdir("weights")
 if not os.path.isdir(savestr):
     os.mkdir(savestr)
 
 kernel = args.kernel
+hidden = args.hidden
 noise_min = args.noise_min
 noise_max = args.noise_max
 noise_val = args.noise_val
@@ -80,7 +84,7 @@ val_dataloader = torch.utils.data.DataLoader(
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
-    filename=f"{savestr}/log_training_lpn_mrs_kernel_{args.kernel}_noise_({args.noise_min}_{args.noise_max})_" + str(datetime.datetime.now()) + ".log",
+    filename=f"{savestr}/log_training_lpn_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})_" + str(datetime.datetime.now()) + ".log",
     level=logging.INFO,
     format="%(asctime)s: %(message)s",
 )
@@ -91,7 +95,7 @@ logging.basicConfig(
 
 model = LPN(
     in_dim=1,
-    hidden=128,
+    hidden=hidden,
     kernel=kernel,
     beta=10,
     alpha=1e-6

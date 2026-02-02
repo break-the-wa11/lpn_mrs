@@ -174,7 +174,7 @@ def lpn_training(
 def train_step(model, optimizer, batch, loss_func, sigma_noise, device):
     target = torch.tensor(batch).unsqueeze(1).to(device)
     noise = torch.randn_like(target)
-    noise_levels = torch.empty(target.size(0)).uniform_(*sigma_noise)
+    noise_levels = torch.empty(target.size(0)).uniform_(sigma_noise[0], sigma_noise[1])
     input = target + noise * noise_levels.view(-1,1,1)
     output = model(input)
 

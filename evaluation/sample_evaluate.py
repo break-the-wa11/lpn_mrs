@@ -35,27 +35,26 @@ def eval_sample(
     true_sample = np.array([true_dataset[i] for i in range(len(true_dataset))])
     bm_sample = np.array([benchmark_dataset[i] for i in range(len(benchmark_dataset))])
 
-    if not os.path.isfile(sample_path):
-        os.makedirs(savestr, exist_ok=True)
-        model.eval()
-        model = model.to(device)
+    os.makedirs(savestr, exist_ok=True)
+    model.eval()
+    model = model.to(device)
 
-        if sample_param['model_name'] == 'GLOW':
-            sample = GLOW_sample(n_samples, model)
-        elif sample_param['model_name'] == 'LPN':
-            sample = LPN_sample(data=true_sample,
-                                model=model,
-                                device=device,
-                                savestr=savestr,
-                                n_samples=sample_param['n_samples'],
-                                sigma_min=sample_param['noise_min'],
-                                sigma_max=sample_param['noise_max'],
-                                max_iter=sample_param['max_iter'])
-        else:
-            raise ValueError(f"Unknown model type!")
-        
-        np.save(sample_path, sample)
-        plot(sample, sample_param['model_name'], savestr)
+    if sample_param['model_name'] == 'GLOW':
+        sample = GLOW_sample(n_samples, model)
+    elif sample_param['model_name'] == 'LPN':
+        sample = LPN_sample(data=true_sample,
+                            model=model,
+                            device=device,
+                            savestr=savestr,
+                            n_samples=sample_param['n_samples'],
+                            sigma_min=sample_param['noise_min'],
+                            sigma_max=sample_param['noise_max'],
+                            max_iter=sample_param['max_iter'])
+    else:
+        raise ValueError(f"Unknown model type!")
+    
+    np.save(sample_path, sample)
+    plot(sample, sample_param['model_name'], savestr)
 
     sample = np.load(sample_path)
     n_samples = sample.shape[0]
