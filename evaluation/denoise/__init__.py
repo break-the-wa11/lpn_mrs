@@ -1,1 +1,1 @@
-from .denoising import wv_denoise, lpn_denoise
+from .denoising import wv_denoise, lpn_denoise, lpn_cond_denoise

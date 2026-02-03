@@ -9,7 +9,7 @@ import pandas as pd
 import random
 
 from datasets import MRSDataset
-from evaluation.denoise import wv_denoise, lpn_denoise
+from evaluation.denoise import wv_denoise, lpn_denoise, lpn_cond_denoise
 from evaluation.prior import perturb_generator
 from hyperparameters import get_denoise_hyperparameters, get_wv_hyperparameters
 
@@ -64,6 +64,11 @@ def eval_denoise(
             if model_type == 'LPN':
                 x_tensor = torch.tensor(x_noisy).unsqueeze(1).to(device)
                 y_model = lpn_denoise(x_tensor, model)
+            elif model_type == 'LPN_cond':
+                x_tensor = torch.tensor(x_noisy).unsqueeze(1).to(device)
+                b = x_tensor.size(0)
+                noise_levels = torch.full((b,1), sigma).to(device)
+                y_model = lpn_cond_denoise(x_tensor, model, noise_levels)
             elif model_type == 'GLOW':
                 pass
 

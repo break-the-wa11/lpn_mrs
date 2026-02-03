@@ -7,7 +7,7 @@ import torch
 import numpy as np
 import pandas as pd
 
-from evaluation.prior import perturb_generator, eval_lpn_prior
+from evaluation.prior import perturb_generator, eval_lpn_prior, eval_lpn_cond_prior
 from hyperparameters import get_perturb_hyperparameters
 
 def eval_prior(
@@ -60,6 +60,8 @@ def eval_prior(
             p = model.log_prob(batch_perturb).detach().cpu().numpy()
         elif model_type == "LPN":
             p, y, fy = eval_lpn_prior(batch_perturb, model, inv_alg=inv_alg)
+        elif model_type == "LPN_cond":
+            p, y, fy = eval_lpn_cond_prior(batch_perturb, model, inv_alg=inv_alg)
         else:
             raise ValueError(f"Unknown model type: {model_type}")
         

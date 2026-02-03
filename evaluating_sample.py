@@ -9,7 +9,7 @@ import os
 import torch
 
 from datasets import MRSDataset
-from networks import LPN, GLOW
+from networks import LPN, LPN_cond, GLOW
 from evaluation import eval_sample
 
 if torch.backends.mps.is_available():
@@ -89,6 +89,29 @@ if model_name == "LPN":
                    'noise_max': sample_max,
                    'max_iter': max_iter,
                    'n_samples': n_samples}
+elif model_name == "LPN_cond":
+    kernel = args.kernel
+    hidden = args.hidden
+    noise_min = args.noise_min
+    noise_max = args.noise_max
+    sample_min = args.sample_min
+    sample_max = args.sample_max
+    max_iter = args.max_iter
+    savestr = f"savings/lpn_cond_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})"
+    model = LPN_cond(
+        in_dim=1,
+        hidden_c=1,
+        hidden=hidden,
+        kernel=kernel,
+        beta=10,
+        alpha=1e-6
+    )
+    model.load_state_dict(torch.load(f"weights/lpn_cond_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})/LPN_best.pt"))
+    sample_param = {'model_name': model_name,
+                   'noise_min': sample_min,
+                   'noise_max': sample_max,
+                   'max_iter': max_iter,
+                   'n_samples': n_samples}
 elif model_name == "GLOW":
     savestr = f"savings/glow_mrs_1"
     model = GLOW(
@@ -134,6 +157,6 @@ eval_sample(
     benchmark_dataset=benchmark_dataset,
     sample_param=sample_param,
     device=device,
-    savestr=savestr,
+    savestr=f"{savestr}/sample",
     logger=logger
 )

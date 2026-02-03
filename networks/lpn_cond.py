@@ -14,6 +14,9 @@ class LPN_cond(nn.Module):
         beta,
         alpha,
     ):
+        # I set hidden_c to be the channel dim for u (noise conditional parts)
+        # I set hidden to be the channel dim for x (signal parts)
+        
         super().__init__()
 
         self.hidden_c = hidden_c
@@ -96,6 +99,8 @@ class LPN_cond(nn.Module):
         self.alpha = alpha
     
     def scalar(self, x, sigma):
+        # The input x is of shape (b,1,512)
+        # The input of sigma is of shape (b,1)
         bsize = x.shape[0]
         signal_size = x.shape[-1]
         u = sigma.clone()
@@ -136,19 +141,20 @@ class LPN_cond(nn.Module):
 
         return z
     
+    # Only init weights that need to be non-negative
     def init_weights(self, mean, std):
         print("init weights")
         with torch.no_grad():
             for core in self.weight_z:
                 core.weight.data.normal_(mean, std).exp_()
-            for core in self.weight_y:
-                core.weight.data.normal_(mean, std).exp_()
+            self.weight_y[0].weight.data.normal_(mean, std).exp_()
 
     # this clips the weights to be non-negative to preserve convexity
     def wclip(self):
         with torch.no_grad():
             for core in self.weight_z:
                 core.weight.data.clamp_(0)
+            self.weight_y[0].weight.data.clamp_(0)
 
     def forward(self, x, sigma):
         with torch.enable_grad():

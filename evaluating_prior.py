@@ -8,7 +8,7 @@ import logging
 import os
 import torch
 
-from networks import LPN, GLOW
+from networks import LPN, LPN_cond, GLOW
 from evaluation import eval_prior
 
 if torch.backends.mps.is_available():
@@ -76,6 +76,19 @@ if model_name == "LPN":
         alpha=1e-6
     )
     model.load_state_dict(torch.load(f"weights/lpn_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})/LPN_best.pt"))
+elif model_name == "LPN_cond":
+    kernel = args.kernel
+    hidden = args.hidden
+    savestr = f"savings/lpn_cond_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})"
+    model = LPN_cond(
+        in_dim=1,
+        hidden_c=1,
+        hidden=hidden,
+        kernel=kernel,
+        beta=10,
+        alpha=1e-6
+    )
+    model.load_state_dict(torch.load(f"weights/lpn_cond_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})/LPN_best.pt"))
 elif model_name == "GLOW":
     savestr = f"savings/glow_mrs_1"
     model = GLOW(
@@ -116,7 +129,7 @@ eval_prior(
     n_samples=n_samples,
     perturb_data_dir=perturb_data_dir,
     raw_data_dir=raw_data_dir,
-    savestr=savestr,
+    savestr=f"{savestr}/prior",
     logger=logger
 )
 logger.info("Evaluation finished.")

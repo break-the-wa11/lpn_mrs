@@ -66,15 +66,18 @@ def lpn_cond_training(
     elif optimizer == "sgd":
         optimizer = torch.optim.SGD(model.parameters())
 
+    # Set up the validator, I validate the model using the same noise given by sigma_val
     validator = Validator(val_dataloader, sigma_val, logger)
 
     global_step = 0
     progress_bar = tqdm(total=num_steps, dynamic_ncols=True)
     progress_bar.set_description(f"Train")
 
+    # Loss monitor is to record the loss and later on plot the validation loss
     loss_monitor = []
     best_val_loss_mse = float('inf')
 
+    # Loss parameter setup
     if loss_type == "l2":
         loss_hparams, lr = {"type": "l2"}, lr
     elif loss_type == "l1":
@@ -113,17 +116,22 @@ def lpn_cond_training(
             progress_bar.update(1)
             progress_bar.set_postfix(**logs)
 
+            # Update hyperparameters for the proximal matching training during the process
             if loss_type == "pm" and global_step >= num_steps_pretrain:
+                # Transit l1 pretraining into proximal matching training
                 if global_step == num_steps_pretrain:
                     loss_hparams, lr = {"type": "prox_matching", "gamma": gamma_init}, lr_init
                     gamma = gamma_init
                     stage_loss_min = float('inf')
                 
+                # After each proximal matching training stage, reduce gamma by a half
                 if global_step in stage_transition_steps:
                     lr = lr_init
                     gamma /= 2
                     stage_loss_min = float('inf')
                     loss_hparams["gamma"] = gamma
+
+                # Sometimes the training gets unstable, so if loss increase dramatically, start from previously saved best model and reduce the learning rate by 10
                 if loss > stage_loss_min + 0.01 or loss > 1 - 1e-3:
                     lr /= 10
                     model.load_state_dict(
@@ -135,6 +143,7 @@ def lpn_cond_training(
                     f"Step {global_step}: loss: {loss}, loss_hparams: {loss_hparams}, lr: {lr}"
                 )
 
+            # Validate the model and save the best performing model with the lowest validation loss
             if validate_every_n_steps > 0 and (global_step+1) % validate_every_n_steps == 0:
                 val_loss_mse = validator.validate(model, loss_hparams, global_step, loss_monitor)
                 # torch.save(
@@ -166,15 +175,24 @@ def lpn_cond_training(
     if logger is not None:
         logger.info(f"Training done. Best val MSE loss: {best_val_loss_mse}")  
 
+    # Save and plot the loss
     df = pd.DataFrame(loss_monitor)
     df.to_csv(f"{savestr}/LPN_loss.csv", index=False)
     plot_loss(loss_monitor, savestr)
 
 
+# One training step
 def train_step(model, optimizer, batch, loss_func, sigma_noise, device):
+    # Prepare ground truth, clean signal
     target = torch.tensor(batch).unsqueeze(1).to(device)
+    
+    # Prepare noise added, later times by noise_levels
     noise = torch.randn_like(target)
-    noise_levels = torch.empty(target.size(0)).uniform_(sigma_noise[0], sigma_noise[1]).view(-1,1)
+
+    # prepare noise levels as input to the model, for each element in the batch, the noise std is uniformly sampled from interval (sigma[0], sigma[1])
+    noise_levels = torch.empty(target.size(0)).uniform_(sigma_noise[0], sigma_noise[1]).view(-1,1).to(device)
+    
+    # Prepare model input, the noisy signal
     input = target + noise * noise_levels.view(-1,1,1)
     output = model(input, noise_levels)
 
@@ -187,6 +205,7 @@ def train_step(model, optimizer, batch, loss_func, sigma_noise, device):
     return loss.detach().item()
 
 
+# Plot loss during training
 def plot_loss(loss_monitor, savestr):
     steps = [entry['step'] for entry in loss_monitor]
     loss = [np.log10(entry['loss']) for entry in loss_monitor]
@@ -215,6 +234,7 @@ def plot_loss(loss_monitor, savestr):
                 bbox_inches="tight")
 
 
+# Validator class that takes data from validation dataset and add fixed level of noise
 class Validator:
     """Class for validation."""
 
@@ -229,12 +249,24 @@ class Validator:
         model.eval()
         device = next(model.parameters()).device
 
+        # I set the batch size the same as the total dataset, so I need only one iteration.
+        # This may be inefficient in loading the data, but easy to implement as I don't have to all results concatenate across different batches
         batch = next(iter(self.dataloader))
-        target = torch.tensor(batch).unsqueeze(1).to(device)
-        noise = torch.randn_like(target)
-        input = target + noise * self.sigma_noise
 
-        output = model(input)
+        # Obtain ground truth
+        target = torch.tensor(batch).unsqueeze(1).to(device)
+
+        # Obtain noise, later times by noise_level
+        noise = torch.randn_like(target)
+
+        # Prepare noise_level input to the model
+        b = target.size(0)  # Get the batch size
+        noise_levels = torch.full((b, 1), self.sigma_noise).to(device)
+
+        # Prepare data input to the model
+        input = target + noise * noise_levels.view(b,1,1)
+
+        output = model(input, noise_levels)
 
         loss_func = get_loss(loss_hparams)
 

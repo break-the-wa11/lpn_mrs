@@ -47,6 +47,7 @@ parser.add_argument("--batch_size", type=int, default=None)
 args = parser.parse_args()
 
 ###############################################################################
+# prepare the folder for saving weights
 savestr = f"weights/lpn_cond_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})"
 if not os.path.isdir("weights"):
     os.mkdir("weights")
@@ -59,7 +60,7 @@ noise_min = args.noise_min
 noise_max = args.noise_max
 noise_val = args.noise_val
 batch_size = 64 if args.batch_size is None else args.batch_size
-hyper_params = get_LPN_hyperparameters()
+hyper_params = get_LPN_hyperparameters()    # get training-related hyperparameters
 
 ###############################################################################
 # Create dataset and dataloaders
@@ -92,7 +93,7 @@ logging.basicConfig(
 ###############################################################################
 # Training
 ###############################################################################
-
+# Here I set hidden_c = 1, because I don't want to add too much parameters from noise condition
 model = LPN_cond(
     in_dim=1,
     hidden_c=1,

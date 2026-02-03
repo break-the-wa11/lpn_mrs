@@ -40,6 +40,32 @@ def LPN_sample(data,
     return sample_all[-1]
 
 
+def LPN_cond_sample(data, 
+               n_samples, 
+               model, 
+               device, 
+               savestr,
+               sigma_min = 0.001, 
+               sigma_max = 0.03,
+               max_iter = 500):
+    """Sample from lpn using Langevin Dynamics"""
+    x = np.mean(data, axis = 0)
+    x = torch.tensor(x).unsqueeze(0).unsqueeze(1).repeat(n_samples, 1, 1).to(device)
+
+    sample_all = []
+    for it in range(max_iter):
+        sigma = sigma_max - (sigma_max - sigma_min) * (it / max_iter)
+        noise_levels = torch.full((n_samples,1), sigma).to(device)
+        n = torch.randn_like(x) * sigma * np.sqrt(2)
+        x = model(x + n, noise_levels)
+
+        sample_all.append(x.squeeze(1).detach().cpu().numpy())
+
+    sample_all = np.array(sample_all)
+    np.save(f'{savestr}/sample_all_lpn.npy', sample_all)
+    return sample_all[-1]
+
+
 def GLOW_sample(n_samples, model):
     """Sample from Glow model"""
     with torch.no_grad():

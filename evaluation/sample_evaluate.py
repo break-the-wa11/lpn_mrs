@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from evaluation.sample import compute_stat, fid, GMM_sample, LPN_sample, GLOW_sample
+from evaluation.sample import compute_stat, fid, GMM_sample, LPN_sample, LPN_cond_sample, GLOW_sample
 
 def eval_sample(
     model,
@@ -50,6 +50,15 @@ def eval_sample(
                             sigma_min=sample_param['noise_min'],
                             sigma_max=sample_param['noise_max'],
                             max_iter=sample_param['max_iter'])
+    elif sample_param['model_name'] == 'LPN_cond':
+        sample = LPN_cond_sample(data=true_sample,
+                                 model=model,
+                                 device=device,
+                                 savestr=savestr,
+                                 n_samples=sample_param['n_samples'],
+                                 sigma_min=sample_param['noise_min'],
+                                 sigma_max=sample_param['noise_max'],
+                                 max_iter=sample_param['max_iter'])
     else:
         raise ValueError(f"Unknown model type!")
     

@@ -59,3 +59,19 @@ def lpn_denoise(x, model):
     device = next(model.parameters()).device
     x = x.float().to(device)
     return model(x).squeeze(1).detach().cpu().numpy()
+
+def lpn_cond_denoise(x, model, noise_levels):
+    """
+    Denoise using noise-conditional lpn
+
+    Args:
+    x: tensor, (b, *), * is the shape allowed by lpn model
+    noise_levels: tensor, (b,1)
+
+    Returns:
+    y: np.array, shape (b, n)
+    """
+    device = next(model.parameters()).device
+    x = x.float().to(device)
+    noise_levels = noise_levels.float().to(device)
+    return model(x, noise_levels).squeeze(1).detach().cpu().numpy()
