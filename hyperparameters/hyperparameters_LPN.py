@@ -10,7 +10,7 @@ def get_LPN_hyperparameters():
 
     args.num_steps = 10000
     args.validate_every_n_steps = 200
-    args.num_steps_pretrain = 1500
+    args.num_steps_pretrain = 500
     args.pretrain_lr = 1e-3
     args.num_stages = 4
     args.gamma_init = 0.1

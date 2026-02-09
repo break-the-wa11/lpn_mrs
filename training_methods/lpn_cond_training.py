@@ -83,6 +83,7 @@ def lpn_cond_training(
     elif loss_type == "l1":
         loss_hparams, lr = {"type": "l1"}, lr
     elif loss_type == "pm":
+        lr_init = lr
         if num_steps_pretrain > 0:
             loss_hparams, lr = {"type": "l1"}, pretrain_lr
         else:
@@ -90,8 +91,6 @@ def lpn_cond_training(
 
         num_steps_per_stage = (num_steps - num_steps_pretrain) // num_stages
         stage_transition_steps = [num_steps_pretrain + i * num_steps_per_stage for i in range(1, num_stages)] 
-
-        lr_init = lr
     else:
         raise NotImplementedError
 
@@ -189,7 +188,13 @@ def train_step(model, optimizer, batch, loss_func, sigma_noise, device):
     # Prepare noise added, later times by noise_levels
     noise = torch.randn_like(target)
 
-    # prepare noise levels as input to the model, for each element in the batch, the noise std is uniformly sampled from interval (sigma[0], sigma[1])
+    # prepare noise levels as input to the model, for each element in the batch, the noise std is log uniformly sampled from interval (sigma[0], sigma[1])
+    # log_sigma_min = np.log(sigma_noise[0]) 
+    # log_sigma_max = np.log(sigma_noise[1])
+    # log_uniform = np.random.uniform(log_sigma_min, log_sigma_max, size=target.size(0))
+    # noise_levels_np = np.exp(log_uniform)
+    # noise_levels = torch.tensor(noise_levels_np, dtype=torch.float32).view(-1, 1).to(device)
+
     noise_levels = torch.empty(target.size(0)).uniform_(sigma_noise[0], sigma_noise[1]).view(-1,1).to(device)
     
     # Prepare model input, the noisy signal

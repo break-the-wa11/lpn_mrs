@@ -147,14 +147,14 @@ class LPN_cond(nn.Module):
         with torch.no_grad():
             for core in self.weight_z:
                 core.weight.data.normal_(mean, std).exp_()
-            self.weight_y[0].weight.data.normal_(mean, std).exp_()
+            for core in self.weight_y:
+                core.weight.data.normal_(mean, std).exp_()
 
     # this clips the weights to be non-negative to preserve convexity
     def wclip(self):
         with torch.no_grad():
             for core in self.weight_z:
                 core.weight.data.clamp_(0)
-            self.weight_y[0].weight.data.clamp_(0)
 
     def forward(self, x, sigma):
         with torch.enable_grad():
