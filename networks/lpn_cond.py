@@ -4,6 +4,31 @@ import numpy as np
 import torch
 from torch import nn
 
+def sigma_encoding(sigma, d_model):
+    """
+    Generate positional encoding for given sigma.
+    
+    Args:
+        sigma: tensor of scalar values. (b)
+        d_model: the dimensionality of the output vector (length of positional encoding).
+    
+    Returns:
+        Tensor of shape (b, d_model) containing the positional encodings.
+    """
+    sigma = sigma * 1000  # Scale sigma to a larger range for better encoding
+
+    # Create a positional encoding array
+    encoding = torch.zeros(sigma.size(0), d_model)
+
+    # Generate the positional encodings
+    for pos in range(sigma.size(0)):
+        for i in range(0, d_model, 2):
+            encoding[pos, i] = torch.sin(sigma[pos] / (10000 ** (i / d_model)))  # Even indices
+            if i + 1 < d_model:
+                encoding[pos, i + 1] = torch.cos(sigma[pos] / (10000 ** (i / d_model)))  # Odd indices
+
+    return encoding
+
 class LPN_cond(nn.Module):
     def __init__(
         self,
@@ -26,7 +51,6 @@ class LPN_cond(nn.Module):
 
         self.weight_tilde = nn.ModuleList(
             [
-                nn.Linear(1, hidden_c * 512),    # feedforward to transform input into (b, hidden_c * 512) then resize to (b, hidden_c, 512) as sigma
                 nn.Conv1d(hidden_c, hidden_c, self.kernel, bias=True, stride=1, padding=self.padding),# 512 u_1
                 nn.Conv1d(hidden_c, hidden_c, self.kernel, bias=True, stride=2, padding=self.padding),  # 256 u_2
                 nn.Conv1d(hidden_c, hidden_c, self.kernel, bias=True, stride=1, padding=self.padding),  # 256 u_3
@@ -116,7 +140,7 @@ class LPN_cond(nn.Module):
         ]
 
         #obtain u0 from feedforward and reshape
-        u = self.weight_tilde[0](sigma).reshape(bsize, self.hidden_c, signal_size) #transform (b,1) to (b,hidden_c, 512)
+        u = sigma_encoding(sigma.reshape(-1), d_model=self.hidden_c * 512).view(bsize, self.hidden_c, 512)
 
         #obtain z1
         z = self.weight_y[0](self.weight_yu[0](u) * x)
@@ -125,7 +149,7 @@ class LPN_cond(nn.Module):
 
         #loop through z2 until z7
         for i in range(0, len(size)):
-            u = self.weight_tilde[i+1](u)
+            u = self.weight_tilde[i](u)
             u = self.act(u)
 
             z = self.weight_z[i](nn.ReLU()(self.weight_zu[i](u)) * z)

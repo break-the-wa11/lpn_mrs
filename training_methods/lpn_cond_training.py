@@ -20,8 +20,7 @@ def lpn_cond_training(
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
     num_steps: int = 40000,
     optimizer: str = "adam",
-    sigma_noise: tuple = (0.001, 0.03),
-    sigma_val: float = 0.01,
+    sigma_noise: tuple = (0, 0.1),
     validate_every_n_steps: int = 1000,
     num_steps_pretrain: int = 20000,
     num_stages: int = 4,
@@ -65,9 +64,6 @@ def lpn_cond_training(
         optimizer = torch.optim.Adam(model.parameters())
     elif optimizer == "sgd":
         optimizer = torch.optim.SGD(model.parameters())
-
-    # Set up the validator, I validate the model using the same noise given by sigma_val
-    validator = Validator(val_dataloader, sigma_val, logger)
 
     global_step = 0
     progress_bar = tqdm(total=num_steps, dynamic_ncols=True)
@@ -144,6 +140,7 @@ def lpn_cond_training(
 
             # Validate the model and save the best performing model with the lowest validation loss
             if validate_every_n_steps > 0 and (global_step+1) % validate_every_n_steps == 0:
+                validator = Validator(val_dataloader, sigma_noise, logger)
                 val_loss_mse = validator.validate(model, loss_hparams, global_step, loss_monitor)
                 # torch.save(
                 #     model.state_dict(),
@@ -210,33 +207,70 @@ def train_step(model, optimizer, batch, loss_func, sigma_noise, device):
     return loss.detach().item()
 
 
-# Plot loss during training
 def plot_loss(loss_monitor, savestr):
-    steps = [entry['step'] for entry in loss_monitor]
-    loss = [np.log10(entry['loss']) for entry in loss_monitor]
-    mse = [np.log10(entry['loss_mse']) for entry in loss_monitor]
-    plt.figure(figsize=(14,6))
+    """Plot average loss and MSE for each bin across training steps."""
+    
+    # Step 1: Group entries with the same bin_name
+    grouped_losses = {}
+    grouped_mses = {}
+    grouped_mses_prop = {}
+    
+    for entry in loss_monitor:
+        bin_name = entry['bin']
+        if bin_name not in grouped_losses:
+            grouped_losses[bin_name] = []
+            grouped_mses[bin_name] = []
+            grouped_mses_prop[bin_name] = []
+        
+        grouped_losses[bin_name].append((entry['step'], entry['loss']))
+        grouped_mses[bin_name].append((entry['step'], entry['loss_mse']))
+        grouped_mses_prop[bin_name].append((entry['step'], entry['loss_mse_prop']))
+    
+    # Step 2: Create a subplot for loss
+    plt.figure(figsize=(21, 6))
 
-    plt.subplot(1,2,1)
-    plt.plot(steps, loss, marker='o', label='Loss', color='b')
-    plt.title("Log Validation Loss over Steps")
-    plt.xlabel('Steps')
-    plt.ylabel('Log Validation Loss')
+    # Subplot for Validation Loss
+    plt.subplot(1, 3, 1)
+    for bin_name, losses in grouped_losses.items():
+        steps, loss_values = zip(*losses)  # Unzip steps and loss values
+        plt.plot(steps, loss_values, marker='o', label=bin_name)  # Plot each bin
+        
+    plt.title("Validation Loss Across Bins Over Steps")
+    plt.xlabel("Training Steps")
+    plt.ylabel("Average Validation Loss")
     plt.grid()
+    plt.xticks(rotation=45)
+    plt.legend()
+    
+    # Step 3: Create a subplot for MSE
+    plt.subplot(1, 3, 2)
+    for bin_name, mses in grouped_mses.items():
+        steps, mse_values = zip(*mses)  # Unzip steps and MSE values
+        plt.plot(steps, mse_values, marker='o', label=bin_name)  # Plot each bin
+        
+    plt.title("MSE Across Bins Over Steps")
+    plt.xlabel("Training Steps")
+    plt.ylabel("Average MSE Loss")
+    plt.grid()
+    plt.xticks(rotation=45)
     plt.legend()
 
-    plt.subplot(1,2,2)
-    plt.plot(steps, mse, marker='o', label='MSE', color='b')
-    plt.title("Log MSE of Denoising over Steps")
-    plt.xlabel('Steps')
-    plt.ylabel('Log MSE Loss')
+    # Step 4: Create a subplot for MSE Proportion
+    plt.subplot(1, 3, 3)
+    for bin_name, mses_prop in grouped_mses_prop.items():
+        steps, mse_values = zip(*mses_prop)  # Unzip steps and MSE values
+        plt.plot(steps, mse_values, marker='o', label=bin_name)  # Plot each bin
+        
+    plt.title("MSE Proportion Across Bins Over Steps")
+    plt.xlabel("Training Steps")
+    plt.ylabel("Average MSE Proportion Loss")
     plt.grid()
+    plt.xticks(rotation=45)
     plt.legend()
 
     plt.tight_layout()
-    plt.savefig(f"{savestr}/LPN_loss.png",
-                dpi=300,
-                bbox_inches="tight")
+    plt.savefig(f"{savestr}/LPN_loss.png", dpi=300, bbox_inches="tight")
+    plt.show()
 
 
 # Validator class that takes data from validation dataset and add fixed level of noise
@@ -245,60 +279,91 @@ class Validator:
 
     def __init__(self, dataloader, sigma_noise, logger=None):
         self.dataloader = dataloader
-        assert type(sigma_noise) == float
-        self.sigma_noise = sigma_noise
         self.logger = logger
+        self.sigma_noise = sigma_noise
+        self.bin_results = {i: [] for i in range(3)}
+        self.bin_edges = np.linspace(sigma_noise[0], sigma_noise[1], 4)
 
     def _validate(self, model, loss_hparams):
         """Validate the model on the validation dataset."""
         model.eval()
         device = next(model.parameters()).device
 
-        # I set the batch size the same as the total dataset, so I need only one iteration.
-        # This may be inefficient in loading the data, but easy to implement as I don't have to all results concatenate across different batches
-        batch = next(iter(self.dataloader))
+        for step, batch in enumerate(self.dataloader):
+            target = torch.tensor(batch).unsqueeze(1).to(device)
+            noise = torch.randn_like(target)
 
-        # Obtain ground truth
-        target = torch.tensor(batch).unsqueeze(1).to(device)
+            b = target.size(0)
+            sigma = np.random.uniform(self.sigma_noise[0], self.sigma_noise[1])
+            noise_levels = torch.full((b,1), sigma).to(device)
 
-        # Obtain noise, later times by noise_level
-        noise = torch.randn_like(target)
+            input = target + noise * noise_levels.view(b,1,1)
+            output = model(input, noise_levels)
 
-        # Prepare noise_level input to the model
-        b = target.size(0)  # Get the batch size
-        noise_levels = torch.full((b, 1), self.sigma_noise).to(device)
+            loss_func = get_loss(loss_hparams)
+            loss = loss_func(output, target).item()
+            loss_mse = torch.mean((output - target) ** 2).item()
+            loss_mse_prop = loss_mse / sigma**2
 
-        # Prepare data input to the model
-        input = target + noise * noise_levels.view(b,1,1)
-
-        output = model(input, noise_levels)
-
-        loss_func = get_loss(loss_hparams)
-
-        loss = loss_func(output, target).item()
-        loss_mse = torch.mean((output - target) ** 2).item()
-
-        self.loss = loss
-        self.loss_mse = loss_mse
+            bin_index = self._get_bin_index(sigma)
+            if bin_index is not None:
+                self.bin_results[bin_index].append({
+                    "loss": loss,
+                    "loss_mse": loss_mse,
+                    "loss_mse_prop": loss_mse_prop
+                })
+    
+    def _get_bin_index(self, sigma):
+        """Determine which bin sigma falls into."""
+        return np.digitize(sigma, self.bin_edges) - 1  # Returns zero-indexed bin
     
     def _log(self, step, loss_monitor, loss_hparams):
-        if self.logger is not None:
-            self.logger.info(f"Validation at step {step}: PM loss: {self.loss}, MSE loss: {self.loss_mse}")
+        """Log average losses per bin and handle cases with no samples recorded."""
+        for bin_index in range(3):
+            bin_name = f"bin ({self.bin_edges[bin_index]:.3f} - {self.bin_edges[bin_index + 1]:.3f})"
+            # Compute average values; if empty, mark it as NaN or a specific value
+            if self.bin_results[bin_index]:
+                avg_loss = np.mean([r['loss'] for r in self.bin_results[bin_index]])
+                avg_loss_mse = np.mean([r['loss_mse'] for r in self.bin_results[bin_index]])
+                avg_loss_mse_prop = np.mean([r['loss_mse_prop'] for r in self.bin_results[bin_index]])
+            else:
+                avg_loss = np.nan  # Mark as NaN if no data
+                avg_loss_mse = np.nan  # Ensure it's consistent
+                avg_loss_mse_prop = np.nan
+
+            # Log the results to the monitor for plotting later
+            loss_monitor.append({
+                "step": step,
+                "bin": bin_name,
+                "loss": avg_loss,
+                "loss_mse": avg_loss_mse,
+                "loss_mse_prop": avg_loss_mse_prop,
+                "loss_type": loss_hparams["type"],
+            })
+
+            if self.logger is not None:
+                self.logger.info(f"Step {step}: {bin_name} - Avg Loss: {avg_loss}, Avg MSE: {avg_loss_mse}, Avg MSE Prop: {avg_loss_mse_prop}")
+
+        self.loss = np.mean([r['loss'] for bin_results in self.bin_results.values() for r in bin_results])
+        self.loss_mse = np.mean([r['loss_mse'] for bin_results in self.bin_results.values() for r in bin_results])
+        self.loss_mse_prop = np.mean([r['loss_mse_prop'] for bin_results in self.bin_results.values() for r in bin_results])
         loss_monitor.append({
             "step": step,
+            "bin": "all",
             "loss": self.loss,
             "loss_mse": self.loss_mse,
+            "loss_mse_prop": self.loss_mse_prop,
             "loss_type": loss_hparams["type"],
         })
+        if self.logger is not None:
+            self.logger.info(f"Step {step}: All bins - Avg Loss: {self.loss}, Avg MSE: {self.loss_mse}, Avg MSE Prop: {self.loss_mse_prop}")
 
     def validate(self, model, loss_hparams, step, loss_monitor):
         """Validate the model and log the metrics."""
 
         self._validate(model, loss_hparams)
-        print(
-            f"Validation at step {step}: PM loss: {self.loss}, MSE loss: {self.loss_mse}"
-        )
         self._log(step, loss_monitor, loss_hparams)
+
         return self.loss_mse
 
 

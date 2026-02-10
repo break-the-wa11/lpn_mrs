@@ -29,19 +29,16 @@ parser.add_argument(
     help="Root directory of dataset.",
 )
 parser.add_argument(
-    "--kernel", type=int, default=101, help="Kernel size for LPN layer."
+    "--kernel", type=int, default=3, help="Kernel size for LPN layer."
 )
 parser.add_argument(
-    "--hidden", type=int, default=128, help="Hidden dim for LPN layer."
+    "--hidden", type=int, default=30, help="Hidden dim for LPN layer."
 )
 parser.add_argument(
-    "--noise_min", type=float, default=0.001, help="Min Noise level for training"
+    "--noise_min", type=float, default=0.0, help="Min Noise level for training"
 )
 parser.add_argument(
     "--noise_max", type=float, default=0.03, help="Max Noise level for training"
-)
-parser.add_argument(
-    "--noise_val", type=float, default=0.01, help="Noise level for validation"
 )
 parser.add_argument("--batch_size", type=int, default=None)
 args = parser.parse_args()
@@ -58,7 +55,6 @@ kernel = args.kernel
 hidden = args.hidden
 noise_min = args.noise_min
 noise_max = args.noise_max
-noise_val = args.noise_val
 batch_size = 64 if args.batch_size is None else args.batch_size
 hyper_params = get_LPN_hyperparameters()    # get training-related hyperparameters
 
@@ -75,7 +71,7 @@ train_dataloader = torch.utils.data.DataLoader(
 )
 val_dataloader = torch.utils.data.DataLoader(
     val_dataset,
-    batch_size = len(val_dataset),
+    batch_size = 1,
     shuffle = False,
     drop_last = True,
     num_workers = 8,
@@ -109,7 +105,6 @@ lpn_cond_training(
     val_dataloader=val_dataloader,
     device=device,
     sigma_noise= (noise_min, noise_max),
-    sigma_val = noise_val,
     num_steps=hyper_params.num_steps,
     validate_every_n_steps=hyper_params.validate_every_n_steps,
     num_steps_pretrain=hyper_params.num_steps_pretrain,
