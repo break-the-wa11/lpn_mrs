@@ -6,11 +6,13 @@ import argparse
 import os
 
 import torch
+import numpy as np
 from datasets import MRSDataset
 from training_methods.lpn_training import lpn_training
+from training_methods.lpn_cond_training import lpn_cond_training
 import logging
 import datetime
-from networks import LPN
+from networks import LPN, LPN_cond, LPN_cond_encode_nn
 from hyperparameters import get_LPN_hyperparameters
 
 if torch.backends.mps.is_available():
@@ -23,48 +25,62 @@ else:
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
+    "--model_name",
+    type=str,
+    default="LPN_cond",
+    help="Type of model. Choose from ['LPN', 'LPN_cond', 'LPN_cond_encode_nn']"
+)
+parser.add_argument(
     "--data_dir",
     type=str,
     default="data/",
     help="Root directory of dataset.",
 )
 parser.add_argument(
-    "--kernel", type=int, default=101, help="Kernel size for LPN layer."
+    "--data_type",
+    type=str,
+    default="low_lipid",
+    help="Type of data to use. Can be 'clean', 'baseline', 'low_lipid' or 'all'. If 'all', it will use all data from both types.",
 )
 parser.add_argument(
-    "--hidden", type=int, default=128, help="Hidden dim for LPN layer."
+    "--kernel", type=int, default=3, help="Kernel size for LPN layer."
+)
+parser.add_argument(
+    "--hidden", type=int, default=30, help="Hidden dim for LPN layer."
 )
 parser.add_argument(
     "--noise_min", type=float, default=0.001, help="Min Noise level for training"
 )
 parser.add_argument(
-    "--noise_max", type=float, default=0.03, help="Max Noise level for training"
+    "--noise_max", type=float, default=0.1, help="Max Noise level for training"
 )
 parser.add_argument(
-    "--noise_val", type=float, default=0.01, help="Noise level for validation"
+    "--gamma_fix", type=bool, default=True, help="Whether to fix gamma during training"
 )
 parser.add_argument("--batch_size", type=int, default=None)
 args = parser.parse_args()
 
 ###############################################################################
-savestr = f"weights/lpn_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})"
+savestr = f"weights/{args.model_name.lower()}_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})"
 if not os.path.isdir("weights"):
     os.mkdir("weights")
 if not os.path.isdir(savestr):
     os.mkdir(savestr)
 
+model_name = args.model_name
+data_type = args.data_type
 kernel = args.kernel
 hidden = args.hidden
 noise_min = args.noise_min
 noise_max = args.noise_max
-noise_val = args.noise_val
+gamma_fix = args.gamma_fix
 batch_size = 64 if args.batch_size is None else args.batch_size
 hyper_params = get_LPN_hyperparameters()
 
 ###############################################################################
 # Create dataset and dataloaders
-train_dataset = MRSDataset(args.data_dir, split="train")
-val_dataset = MRSDataset(args.data_dir, split="validate")
+train_dataset = MRSDataset(args.data_dir, split="train", data_type=data_type)
+val_dataset = MRSDataset(args.data_dir, split="validate", data_type=data_type)
 train_dataloader = torch.utils.data.DataLoader(
     train_dataset,
     batch_size=batch_size,
@@ -84,7 +100,7 @@ val_dataloader = torch.utils.data.DataLoader(
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
-    filename=f"{savestr}/log_training_lpn_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})_" + str(datetime.datetime.now()) + ".log",
+    filename=f"{savestr}/log_training_{args.model_name.lower()}_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})_" + str(datetime.datetime.now()) + ".log",
     level=logging.INFO,
     format="%(asctime)s: %(message)s",
 )
@@ -93,30 +109,72 @@ logging.basicConfig(
 # Training
 ###############################################################################
 
-model = LPN(
-    in_dim=1,
-    hidden=hidden,
-    kernel=kernel,
-    beta=10,
-    alpha=1e-6
-).to(device)
+if model_name == 'LPN':
+    model = LPN(
+        in_dim=1,
+        hidden=hidden,
+        kernel=kernel,
+        beta=10,
+        alpha=1e-6
+    ).to(device)
 
-lpn_training(
-    model=model,
-    train_dataloader=train_dataloader,
-    val_dataloader=val_dataloader,
-    device=device,
-    sigma_noise= (noise_min, noise_max),
-    sigma_val = noise_val,
-    num_steps=hyper_params.num_steps,
-    validate_every_n_steps=hyper_params.validate_every_n_steps,
-    num_steps_pretrain=hyper_params.num_steps_pretrain,
-    num_stages=hyper_params.num_stages,
-    gamma_init=hyper_params.gamma_init,
-    pretrain_lr=hyper_params.pretrain_lr,
-    lr=hyper_params.lr,
-    savestr=savestr,
-    loss_type="pm",
-    logger=logger,
-)
+    lpn_training(
+        model=model,
+        train_dataloader=train_dataloader,
+        val_dataloader=val_dataloader,
+        device=device,
+        sigma_noise= noise_max,
+        num_steps=hyper_params.num_steps,
+        validate_every_n_steps=hyper_params.validate_every_n_steps,
+        num_steps_pretrain=hyper_params.num_steps_pretrain,
+        num_stages=hyper_params.num_stages,
+        gamma_init=hyper_params.gamma_init,
+        gamma_fix=gamma_fix,
+        pretrain_lr=hyper_params.pretrain_lr,
+        lr=hyper_params.lr,
+        savestr=savestr,
+        loss_type="pm",
+        logger=logger,
+    )
+else:
+    if model_name == 'LPN_cond':
+        model = LPN_cond(
+            in_dim=1,
+            hidden_c=1,
+            hidden=hidden,
+            kernel=kernel,
+            beta=10,
+            alpha=1e-6
+        ).to(device)
+    elif model_name == 'LPN_cond_encode_nn':
+        model = LPN_cond_encode_nn(
+            in_dim=1,
+            hidden_c=1,
+            hidden=hidden,
+            kernel=kernel,
+            beta=10,
+            alpha=1e-6
+        ).to(device)
+    else:
+        raise NotImplementedError(f'Unknown model: {model_name}')
+
+    lpn_cond_training(
+        model=model,
+        train_dataloader=train_dataloader,
+        val_dataloader=val_dataloader,
+        device=device,
+        sigma_noise= (noise_min, noise_max),
+        num_steps=hyper_params.num_steps,
+        validate_every_n_steps=hyper_params.validate_every_n_steps,
+        validate_noise = [noise_min, np.sqrt(noise_min * noise_max), noise_max],
+        num_steps_pretrain=hyper_params.num_steps_pretrain,
+        num_stages=hyper_params.num_stages,
+        gamma_init=hyper_params.gamma_init,
+        gamma_fix=gamma_fix,
+        pretrain_lr=hyper_params.pretrain_lr,
+        lr=hyper_params.lr,
+        savestr=savestr,
+        loss_type="pm",
+        logger=logger,
+    )
 logger.info("Training finished.")

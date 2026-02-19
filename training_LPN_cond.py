@@ -10,7 +10,7 @@ from datasets import MRSDataset
 from training_methods.lpn_cond_training import lpn_cond_training
 import logging
 import datetime
-from networks import LPN_cond
+from networks import LPN_cond, LPN_cond_encode_nn
 from hyperparameters import get_LPN_hyperparameters
 
 if torch.backends.mps.is_available():
@@ -29,6 +29,12 @@ parser.add_argument(
     help="Root directory of dataset.",
 )
 parser.add_argument(
+    "--data_type",
+    type=str,
+    default="low_lipid",
+    help="Type of data to use. Can be 'clean', 'baseline', 'low_lipid' or 'all'. If 'all', it will use all data from both types.",
+)
+parser.add_argument(
     "--kernel", type=int, default=3, help="Kernel size for LPN layer."
 )
 parser.add_argument(
@@ -38,7 +44,10 @@ parser.add_argument(
     "--noise_min", type=float, default=0.0, help="Min Noise level for training"
 )
 parser.add_argument(
-    "--noise_max", type=float, default=0.03, help="Max Noise level for training"
+    "--noise_max", type=float, default=0.1, help="Max Noise level for training"
+)
+parser.add_argument(
+    "--gamma_fix", type=bool, default=True, help="Whether to fix gamma during training"
 )
 parser.add_argument("--batch_size", type=int, default=None)
 args = parser.parse_args()
@@ -51,17 +60,19 @@ if not os.path.isdir("weights"):
 if not os.path.isdir(savestr):
     os.mkdir(savestr)
 
+data_type = args.data_type
 kernel = args.kernel
 hidden = args.hidden
 noise_min = args.noise_min
 noise_max = args.noise_max
+gamma_fix = args.gamma_fix
 batch_size = 64 if args.batch_size is None else args.batch_size
 hyper_params = get_LPN_hyperparameters()    # get training-related hyperparameters
 
 ###############################################################################
 # Create dataset and dataloaders
-train_dataset = MRSDataset(args.data_dir, split="train")
-val_dataset = MRSDataset(args.data_dir, split="validate")
+train_dataset = MRSDataset(args.data_dir, split="train", data_type=data_type)
+val_dataset = MRSDataset(args.data_dir, split="validate", data_type=data_type)
 train_dataloader = torch.utils.data.DataLoader(
     train_dataset,
     batch_size=batch_size,
@@ -110,6 +121,7 @@ lpn_cond_training(
     num_steps_pretrain=hyper_params.num_steps_pretrain,
     num_stages=hyper_params.num_stages,
     gamma_init=hyper_params.gamma_init,
+    gamma_fix=gamma_fix,
     pretrain_lr=hyper_params.pretrain_lr,
     lr=hyper_params.lr,
     savestr=savestr,

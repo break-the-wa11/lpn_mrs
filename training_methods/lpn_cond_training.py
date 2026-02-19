@@ -3,6 +3,7 @@ Train LPN by proximal matching
 """
 
 import argparse
+from math import dist
 import os
 
 import torch
@@ -20,11 +21,13 @@ def lpn_cond_training(
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
     num_steps: int = 40000,
     optimizer: str = "adam",
-    sigma_noise: tuple = (0, 0.1),
+    sigma_noise: tuple = (0.001, 0.1),
     validate_every_n_steps: int = 1000,
+    validate_noise: list = [0.001, 0.01, 0.1],
     num_steps_pretrain: int = 20000,
     num_stages: int = 4,
     gamma_init: float = 0.1,
+    gamma_fix: bool = True,
     pretrain_lr: float = 1e-3,
     lr: float = 1e-4,
     savestr: str = "weights",
@@ -41,11 +44,11 @@ def lpn_cond_training(
         num_steps: Total number of training iterations.
         optimizer: Optimizer to use.
         sigma_noise: noise std in prox matching.
-        sigma_val: noise std in validation.
         validate_every_n_steps: Frequency of validation.
         num_steps_pretrain: Number of iterations for L1 loss pretraining.
         num_stages: Number of stages in prox matching loss schedule.
         gamma_init: Initial gamma for proximal matching.
+        gamma_fix: Whether to fix gamma or scale it with noise level.
         pretrain_lr: Learning rate for L1 loss pretraining.
         lr: Learning rate for prox matching.
         savestr: Directory to save the model checkpoints.
@@ -71,7 +74,7 @@ def lpn_cond_training(
 
     # Loss monitor is to record the loss and later on plot the validation loss
     loss_monitor = []
-    best_val_loss_mse = float('inf')
+    best_val_loss_mse_prop = float('inf')
 
     # Loss parameter setup
     if loss_type == "l2":
@@ -94,14 +97,12 @@ def lpn_cond_training(
         for step, batch in enumerate(train_dataloader):
             model.train()
 
-            # get loss
-            loss_func = get_loss(loss_hparams)
             # set learning rate
             for g in optimizer.param_groups:
                 g["lr"] = lr
 
             # Train step
-            loss = train_step(model, optimizer, batch, loss_func, sigma_noise, device)
+            loss = train_step(model, optimizer, batch, loss_hparams, sigma_noise, gamma_fix, device)
 
             logs = {
                 "loss": loss,
@@ -140,14 +141,14 @@ def lpn_cond_training(
 
             # Validate the model and save the best performing model with the lowest validation loss
             if validate_every_n_steps > 0 and (global_step+1) % validate_every_n_steps == 0:
-                validator = Validator(val_dataloader, sigma_noise, logger)
-                val_loss_mse = validator.validate(model, loss_hparams, global_step, loss_monitor)
+                validator = Validator(val_dataloader, validate_noise, logger)
+                val_loss_mse_prop = validator.validate(model, loss_hparams, global_step, loss_monitor, gamma_fix)
                 # torch.save(
                 #     model.state_dict(),
                 #     os.path.join(savestr, f"LPN_step{global_step+1}.pt")
                 # )
-                if val_loss_mse < best_val_loss_mse:
-                    best_val_loss_mse = val_loss_mse
+                if val_loss_mse_prop < best_val_loss_mse_prop:
+                    best_val_loss_mse_prop = val_loss_mse_prop
                     torch.save(
                         model.state_dict(),
                         os.path.join(savestr, f"LPN_best.pt")
@@ -167,9 +168,9 @@ def lpn_cond_training(
         if global_step >= num_steps:
             break
 
-    print(f"Training done. Best val MSE loss: {best_val_loss_mse}")
+    print(f"Training done. Best val MSE loss prop: {best_val_loss_mse_prop}")
     if logger is not None:
-        logger.info(f"Training done. Best val MSE loss: {best_val_loss_mse}")  
+        logger.info(f"Training done. Best val MSE loss prop: {best_val_loss_mse_prop}")  
 
     # Save and plot the loss
     df = pd.DataFrame(loss_monitor)
@@ -178,7 +179,7 @@ def lpn_cond_training(
 
 
 # One training step
-def train_step(model, optimizer, batch, loss_func, sigma_noise, device):
+def train_step(model, optimizer, batch, loss_hparams, sigma_noise, gamma_fix, device):
     # Prepare ground truth, clean signal
     target = torch.tensor(batch).unsqueeze(1).to(device)
     
@@ -198,7 +199,13 @@ def train_step(model, optimizer, batch, loss_func, sigma_noise, device):
     input = target + noise * noise_levels.view(-1,1,1)
     output = model(input, noise_levels)
 
-    loss = loss_func(output, target)
+    loss_func = get_loss(loss_hparams)
+
+    if loss_hparams["type"] == "prox_matching":
+        loss = loss_func(output, target, noise_levels, gamma_fix)
+    else:
+        loss = loss_func(output, target)
+
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
@@ -216,7 +223,7 @@ def plot_loss(loss_monitor, savestr):
     grouped_mses_prop = {}
     
     for entry in loss_monitor:
-        bin_name = entry['bin']
+        bin_name = entry['val_noise']
         if bin_name not in grouped_losses:
             grouped_losses[bin_name] = []
             grouped_mses[bin_name] = []
@@ -251,6 +258,7 @@ def plot_loss(loss_monitor, savestr):
     plt.title("MSE Across Bins Over Steps")
     plt.xlabel("Training Steps")
     plt.ylabel("Average MSE Loss")
+    plt.ylim(0,0.002)
     plt.grid()
     plt.xticks(rotation=45)
     plt.legend()
@@ -264,6 +272,7 @@ def plot_loss(loss_monitor, savestr):
     plt.title("MSE Proportion Across Bins Over Steps")
     plt.xlabel("Training Steps")
     plt.ylabel("Average MSE Proportion Loss")
+    plt.ylim(0,1)
     plt.grid()
     plt.xticks(rotation=45)
     plt.legend()
@@ -277,91 +286,77 @@ def plot_loss(loss_monitor, savestr):
 class Validator:
     """Class for validation."""
 
-    def __init__(self, dataloader, sigma_noise, logger=None):
+    def __init__(self, dataloader, val_noise, logger=None):
         self.dataloader = dataloader
         self.logger = logger
-        self.sigma_noise = sigma_noise
-        self.bin_results = {i: [] for i in range(3)}
-        self.bin_edges = np.linspace(sigma_noise[0], sigma_noise[1], 4)
+        self.val_noise = val_noise
+        self.bin_results = {sigma: [] for sigma in val_noise}
 
-    def _validate(self, model, loss_hparams):
+    def _validate(self, model, loss_hparams, gamma_fix):
         """Validate the model on the validation dataset."""
         model.eval()
         device = next(model.parameters()).device
 
-        for step, batch in enumerate(self.dataloader):
-            target = torch.tensor(batch).unsqueeze(1).to(device)
-            noise = torch.randn_like(target)
+        for sigma in self.val_noise:
+            for step, batch in enumerate(self.dataloader):
+                target = torch.tensor(batch).unsqueeze(1).to(device)
+                noise = torch.randn_like(target)
 
-            b = target.size(0)
-            sigma = np.random.uniform(self.sigma_noise[0], self.sigma_noise[1])
-            noise_levels = torch.full((b,1), sigma).to(device)
+                input = target + noise * sigma
+                noise_levels = torch.full((target.size(0),1), sigma).to(device)
+                output = model(input, noise_levels).to(device)
 
-            input = target + noise * noise_levels.view(b,1,1)
-            output = model(input, noise_levels)
+                loss_func = get_loss(loss_hparams)
 
-            loss_func = get_loss(loss_hparams)
-            loss = loss_func(output, target).item()
-            loss_mse = torch.mean((output - target) ** 2).item()
-            loss_mse_prop = loss_mse / sigma**2
+                if loss_hparams["type"] == "prox_matching":
+                    loss = loss_func(output, target, noise_levels, gamma_fix).item()
+                else:
+                    loss = loss_func(output, target).item()
+                
+                loss_mse = torch.mean((output - target) ** 2).item()
+                loss_mse_prop = loss_mse / sigma**2
 
-            bin_index = self._get_bin_index(sigma)
-            if bin_index is not None:
-                self.bin_results[bin_index].append({
+                self.bin_results[sigma].append({
                     "loss": loss,
                     "loss_mse": loss_mse,
                     "loss_mse_prop": loss_mse_prop
                 })
-    
-    def _get_bin_index(self, sigma):
-        """Determine which bin sigma falls into."""
-        return np.digitize(sigma, self.bin_edges) - 1  # Returns zero-indexed bin
-    
+        
     def _log(self, step, loss_monitor, loss_hparams):
-        """Log average losses per bin and handle cases with no samples recorded."""
-        for bin_index in range(3):
-            bin_name = f"bin ({self.bin_edges[bin_index]:.3f} - {self.bin_edges[bin_index + 1]:.3f})"
-            # Compute average values; if empty, mark it as NaN or a specific value
-            if self.bin_results[bin_index]:
-                avg_loss = np.mean([r['loss'] for r in self.bin_results[bin_index]])
-                avg_loss_mse = np.mean([r['loss_mse'] for r in self.bin_results[bin_index]])
-                avg_loss_mse_prop = np.mean([r['loss_mse_prop'] for r in self.bin_results[bin_index]])
-            else:
-                avg_loss = np.nan  # Mark as NaN if no data
-                avg_loss_mse = np.nan  # Ensure it's consistent
-                avg_loss_mse_prop = np.nan
+        for sigma in self.val_noise:
+            avg_loss = np.mean([r['loss'] for r in self.bin_results[sigma]])
+            avg_loss_mse = np.mean([r['loss_mse'] for r in self.bin_results[sigma]])
+            avg_loss_mse_prop = np.mean([r['loss_mse_prop'] for r in self.bin_results[sigma]])
+            if self.logger is not None:
+                self.logger.info(f"Step {step}: Noise {sigma:.3f} - Avg Loss: {avg_loss}, Avg MSE: {avg_loss_mse}, Avg MSE Prop: {avg_loss_mse_prop}")
 
-            # Log the results to the monitor for plotting later
             loss_monitor.append({
                 "step": step,
-                "bin": bin_name,
+                "val_noise": f"{sigma:.3f}",
                 "loss": avg_loss,
                 "loss_mse": avg_loss_mse,
                 "loss_mse_prop": avg_loss_mse_prop,
                 "loss_type": loss_hparams["type"],
             })
 
-            if self.logger is not None:
-                self.logger.info(f"Step {step}: {bin_name} - Avg Loss: {avg_loss}, Avg MSE: {avg_loss_mse}, Avg MSE Prop: {avg_loss_mse_prop}")
-
         self.loss = np.mean([r['loss'] for bin_results in self.bin_results.values() for r in bin_results])
         self.loss_mse = np.mean([r['loss_mse'] for bin_results in self.bin_results.values() for r in bin_results])
         self.loss_mse_prop = np.mean([r['loss_mse_prop'] for bin_results in self.bin_results.values() for r in bin_results])
         loss_monitor.append({
             "step": step,
-            "bin": "all",
+            "val_noise": "all",
             "loss": self.loss,
             "loss_mse": self.loss_mse,
             "loss_mse_prop": self.loss_mse_prop,
             "loss_type": loss_hparams["type"],
         })
         if self.logger is not None:
-            self.logger.info(f"Step {step}: All bins - Avg Loss: {self.loss}, Avg MSE: {self.loss_mse}, Avg MSE Prop: {self.loss_mse_prop}")
+            self.logger.info(f"Step {step}: All noise levels - Avg Loss: {self.loss}, Avg MSE: {self.loss_mse}, Avg MSE Prop: {self.loss_mse_prop}")
 
-    def validate(self, model, loss_hparams, step, loss_monitor):
+    def validate(self, model, loss_hparams, step, loss_monitor, gamma_fix):
         """Validate the model and log the metrics."""
 
-        self._validate(model, loss_hparams)
+        self._validate(model, loss_hparams, gamma_fix)
         self._log(step, loss_monitor, loss_hparams)
 
         return self.loss_mse
@@ -424,10 +419,15 @@ class ExpDiracSrgt(nn.Module):
         super().__init__()
         self.gamma = gamma
 
-    def forward(self, input, target):
+    def forward(self, input, target, noise_levels, gamma_fix):
         """
         input, target: batch, *
+        noise_levels: (batch, 1)
         """
         bsize = input.shape[0]
         dist = (input - target).pow(2).reshape(bsize, -1).mean(1).sqrt()
-        return exp_func(dist, self.gamma).mean()
+        
+        if gamma_fix:
+            return exp_func(dist, self.gamma).mean()
+        else:
+            return exp_func(dist, self.gamma * noise_levels.squeeze(1)).mean()

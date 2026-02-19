@@ -75,11 +75,11 @@ if model_name == "LPN":
         beta=10,
         alpha=1e-6
     )
-    model.load_state_dict(torch.load(f"weights/lpn_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})/LPN_best.pt"))
+    model.load_state_dict(torch.load(f"weights/lpn_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})_all/LPN_best.pt"))
 elif model_name == "LPN_cond":
     kernel = args.kernel
     hidden = args.hidden
-    savestr = f"savings/lpn_cond_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})"
+    savestr = f"savings/lpn_cond_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})_all"
     model = LPN_cond(
         in_dim=1,
         hidden_c=1,
@@ -88,7 +88,7 @@ elif model_name == "LPN_cond":
         beta=10,
         alpha=1e-6
     )
-    model.load_state_dict(torch.load(f"weights/lpn_cond_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})/LPN_best.pt"))
+    model.load_state_dict(torch.load(f"weights/lpn_cond_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})_all/LPN_best.pt"))
 elif model_name == "GLOW":
     savestr = f"savings/glow_mrs_1"
     model = GLOW(

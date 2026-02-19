@@ -8,7 +8,7 @@ import logging
 import os
 import torch
 
-from networks import LPN, GLOW, LPN_cond
+from networks import LPN, GLOW, LPN_cond, LPN_cond_encode_nn
 from evaluation import eval_denoise
 
 if torch.backends.mps.is_available():
@@ -33,16 +33,16 @@ parser.add_argument(
     default="LPN"
 )
 parser.add_argument(
-    "--kernel", type=int, default=101, help="Kernel size for LPN layer."
+    "--kernel", type=int, default=3, help="Kernel size for LPN layer."
 )
 parser.add_argument(
-    "--hidden", type=int, default=128, help="Hidden dim for LPN layer."
+    "--hidden", type=int, default=30, help="Hidden dim for LPN layer."
 )
 parser.add_argument(
     "--noise_min", type=float, default=0.001, help="Min noise level during training"
 )
 parser.add_argument(
-    "--noise_max", type=float, default=0.03, help="Max noise level during training"
+    "--noise_max", type=float, default=0.1, help="Max noise level during training"
 )
 parser.add_argument(
     "--n_samples", 
@@ -82,6 +82,19 @@ elif model_name == "LPN_cond":
         alpha=1e-6
     )
     model.load_state_dict(torch.load(f"weights/lpn_cond_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})/LPN_best.pt"))
+elif model_name == "LPN_cond_encode_nn":
+    kernel = args.kernel
+    hidden = args.hidden
+    savestr = f"savings/lpn_cond_encode_nn_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})"
+    model = LPN_cond_encode_nn(
+        in_dim=1,
+        hidden_c=1,
+        hidden=hidden,
+        kernel=kernel,
+        beta=10,
+        alpha=1e-6
+    )
+    model.load_state_dict(torch.load(f"weights/lpn_cond_encode_nn_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})/LPN_best.pt"))
 elif model_name == "GLOW":
     savestr = f"savings/glow_mrs_1"
     model = GLOW(

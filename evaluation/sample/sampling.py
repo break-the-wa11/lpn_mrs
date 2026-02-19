@@ -26,10 +26,11 @@ def LPN_sample(data,
     """Sample from lpn using Langevin Dynamics"""
     x = np.mean(data, axis = 0)
     x = torch.tensor(x).unsqueeze(0).unsqueeze(1).repeat(n_samples, 1, 1).to(device)
+    noise_schedule = np.linspace(sigma_max, sigma_min, 5)
 
     sample_all = []
     for it in range(max_iter):
-        sigma = sigma_max - (sigma_max - sigma_min) * (it / max_iter)
+        sigma = noise_schedule[it // (max_iter // 5)]
         n = torch.randn_like(x) * sigma * np.sqrt(2)
         x = model(x + n)
 
@@ -51,10 +52,11 @@ def LPN_cond_sample(data,
     """Sample from lpn using Langevin Dynamics"""
     x = np.mean(data, axis = 0)
     x = torch.tensor(x).unsqueeze(0).unsqueeze(1).repeat(n_samples, 1, 1).to(device)
+    noise_schedule = np.linspace(sigma_max, sigma_min, 5)
 
     sample_all = []
     for it in range(max_iter):
-        sigma = sigma_max - (sigma_max - sigma_min) * (it / max_iter)
+        sigma = noise_schedule[it // (max_iter // 5)]
         noise_levels = torch.full((n_samples,1), sigma).to(device)
         n = torch.randn_like(x) * sigma * np.sqrt(2)
         x = model(x + n, noise_levels)

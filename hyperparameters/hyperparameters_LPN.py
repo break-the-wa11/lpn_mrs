@@ -8,12 +8,12 @@ import argparse
 def get_LPN_hyperparameters():
     args = argparse.Namespace()
 
-    args.num_steps = 10000
+    args.num_steps = 20000
     args.validate_every_n_steps = 200
-    args.num_steps_pretrain = 1000
+    args.num_steps_pretrain = 1500
     args.pretrain_lr = 1e-3
     args.num_stages = 4
-    args.gamma_init = 0.5
+    args.gamma_init = 0.1
     args.lr = 1e-4
 
     return args

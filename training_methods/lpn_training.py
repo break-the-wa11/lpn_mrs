@@ -20,12 +20,12 @@ def lpn_training(
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
     num_steps: int = 40000,
     optimizer: str = "adam",
-    sigma_noise: tuple = (0.001, 0.03),
-    sigma_val: float = 0.01,
+    sigma_noise: float = 0.01,
     validate_every_n_steps: int = 1000,
     num_steps_pretrain: int = 20000,
     num_stages: int = 4,
     gamma_init: float = 0.1,
+    gamma_fix: float = 1e-3,
     pretrain_lr: float = 1e-3,
     lr: float = 1e-4,
     savestr: str = "weights",
@@ -42,11 +42,11 @@ def lpn_training(
         num_steps: Total number of training iterations.
         optimizer: Optimizer to use.
         sigma_noise: noise std in prox matching.
-        sigma_val: noise std in validation.
         validate_every_n_steps: Frequency of validation.
         num_steps_pretrain: Number of iterations for L1 loss pretraining.
         num_stages: Number of stages in prox matching loss schedule.
         gamma_init: Initial gamma for proximal matching.
+        gamma_fix: Whether to fix gamma or scale it with noise level.
         pretrain_lr: Learning rate for L1 loss pretraining.
         lr: Learning rate for prox matching.
         savestr: Directory to save the model checkpoints.
@@ -66,20 +66,19 @@ def lpn_training(
     elif optimizer == "sgd":
         optimizer = torch.optim.SGD(model.parameters())
 
-    validator = Validator(val_dataloader, sigma_val, logger)
-
     global_step = 0
     progress_bar = tqdm(total=num_steps, dynamic_ncols=True)
     progress_bar.set_description(f"Train")
 
     loss_monitor = []
-    best_val_loss_mse = float('inf')
+    best_val_loss_mse_prop = float('inf')
 
     if loss_type == "l2":
         loss_hparams, lr = {"type": "l2"}, lr
     elif loss_type == "l1":
         loss_hparams, lr = {"type": "l1"}, lr
     elif loss_type == "pm":
+        lr_init = lr
         if num_steps_pretrain > 0:
             loss_hparams, lr = {"type": "l1"}, pretrain_lr
         else:
@@ -87,8 +86,6 @@ def lpn_training(
 
         num_steps_per_stage = (num_steps - num_steps_pretrain) // num_stages
         stage_transition_steps = [num_steps_pretrain + i * num_steps_per_stage for i in range(1, num_stages)] 
-
-        lr_init = lr
     else:
         raise NotImplementedError
 
@@ -96,14 +93,12 @@ def lpn_training(
         for step, batch in enumerate(train_dataloader):
             model.train()
 
-            # get loss
-            loss_func = get_loss(loss_hparams)
             # set learning rate
             for g in optimizer.param_groups:
                 g["lr"] = lr
 
             # Train step
-            loss = train_step(model, optimizer, batch, loss_func, sigma_noise, device)
+            loss = train_step(model, optimizer, batch, loss_hparams, sigma_noise, gamma_fix, device)
 
             logs = {
                 "loss": loss,
@@ -124,7 +119,7 @@ def lpn_training(
                     gamma /= 2
                     stage_loss_min = float('inf')
                     loss_hparams["gamma"] = gamma
-                if loss > stage_loss_min + 0.01 or loss > 1 - 1e-3:
+                if loss > stage_loss_min + 0.01:
                     lr /= 10
                     model.load_state_dict(
                         torch.load(os.path.join(savestr, f"LPN_best.pt"))
@@ -136,13 +131,14 @@ def lpn_training(
                 )
 
             if validate_every_n_steps > 0 and (global_step+1) % validate_every_n_steps == 0:
-                val_loss_mse = validator.validate(model, loss_hparams, global_step, loss_monitor)
+                validator = Validator(val_dataloader, sigma_noise, logger)
+                val_loss_mse_prop = validator.validate(model, loss_hparams, global_step, loss_monitor, gamma_fix)
                 # torch.save(
                 #     model.state_dict(),
                 #     os.path.join(savestr, f"LPN_step{global_step+1}.pt")
                 # )
-                if val_loss_mse < best_val_loss_mse:
-                    best_val_loss_mse = val_loss_mse
+                if val_loss_mse_prop < best_val_loss_mse_prop:
+                    best_val_loss_mse_prop = val_loss_mse_prop
                     torch.save(
                         model.state_dict(),
                         os.path.join(savestr, f"LPN_best.pt")
@@ -162,23 +158,29 @@ def lpn_training(
         if global_step >= num_steps:
             break
 
-    print(f"Training done. Best val MSE loss: {best_val_loss_mse}")
+    print(f"Training done. Best val MSE loss prop: {best_val_loss_mse_prop}")
     if logger is not None:
-        logger.info(f"Training done. Best val MSE loss: {best_val_loss_mse}")  
+        logger.info(f"Training done. Best val MSE loss prop: {best_val_loss_mse_prop}")  
 
     df = pd.DataFrame(loss_monitor)
     df.to_csv(f"{savestr}/LPN_loss.csv", index=False)
     plot_loss(loss_monitor, savestr)
 
 
-def train_step(model, optimizer, batch, loss_func, sigma_noise, device):
+def train_step(model, optimizer, batch, loss_hparams, sigma_noise, gamma_fix, device):
     target = torch.tensor(batch).unsqueeze(1).to(device)
     noise = torch.randn_like(target)
-    noise_levels = torch.empty(target.size(0)).uniform_(sigma_noise[0], sigma_noise[1])
+    noise_levels = torch.full((target.size(0), 1), sigma_noise)
     input = target + noise * noise_levels.view(-1,1,1)
     output = model(input)
 
-    loss = loss_func(output, target)
+    loss_func = get_loss(loss_hparams)
+    
+    if loss_hparams["type"] == "prox_matching":
+        loss = loss_func(output, target, noise_levels, gamma_fix)
+    else:
+        loss = loss_func(output, target)
+
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
@@ -188,80 +190,138 @@ def train_step(model, optimizer, batch, loss_func, sigma_noise, device):
 
 
 def plot_loss(loss_monitor, savestr):
-    steps = [entry['step'] for entry in loss_monitor]
-    loss = [np.log10(entry['loss']) for entry in loss_monitor]
-    mse = [np.log10(entry['loss_mse']) for entry in loss_monitor]
-    plt.figure(figsize=(14,6))
+    """Plot average loss and MSE for each bin across training steps."""
+    
+    # Step 1: Group entries with the same bin_name
+    grouped_losses = {}
+    grouped_mses = {}
+    grouped_mses_prop = {}
+    
+    for entry in loss_monitor:
+        bin_name = entry['val_noise']
+        if bin_name not in grouped_losses:
+            grouped_losses[bin_name] = []
+            grouped_mses[bin_name] = []
+            grouped_mses_prop[bin_name] = []
+        
+        grouped_losses[bin_name].append((entry['step'], entry['loss']))
+        grouped_mses[bin_name].append((entry['step'], entry['loss_mse']))
+        grouped_mses_prop[bin_name].append((entry['step'], entry['loss_mse_prop']))
+    
+    # Step 2: Create a subplot for loss
+    plt.figure(figsize=(21, 6))
 
-    plt.subplot(1,2,1)
-    plt.plot(steps, loss, marker='o', label='Loss', color='b')
-    plt.title("Log Validation Loss over Steps")
-    plt.xlabel('Steps')
-    plt.ylabel('Log Validation Loss')
+    # Subplot for Validation Loss
+    plt.subplot(1, 3, 1)
+    for bin_name, losses in grouped_losses.items():
+        steps, loss_values = zip(*losses)  # Unzip steps and loss values
+        plt.plot(steps, loss_values, marker='o', label=bin_name)  # Plot each bin
+        
+    plt.title("Validation Loss Across Bins Over Steps")
+    plt.xlabel("Training Steps")
+    plt.ylabel("Average Validation Loss")
     plt.grid()
+    plt.xticks(rotation=45)
+    plt.legend()
+    
+    # Step 3: Create a subplot for MSE
+    plt.subplot(1, 3, 2)
+    for bin_name, mses in grouped_mses.items():
+        steps, mse_values = zip(*mses)  # Unzip steps and MSE values
+        plt.plot(steps, mse_values, marker='o', label=bin_name)  # Plot each bin
+        
+    plt.title("MSE Across Bins Over Steps")
+    plt.xlabel("Training Steps")
+    plt.ylabel("Average MSE Loss")
+    plt.grid()
+    plt.xticks(rotation=45)
     plt.legend()
 
-    plt.subplot(1,2,2)
-    plt.plot(steps, mse, marker='o', label='MSE', color='b')
-    plt.title("Log MSE of Denoising over Steps")
-    plt.xlabel('Steps')
-    plt.ylabel('Log MSE Loss')
+    # Step 4: Create a subplot for MSE Proportion
+    plt.subplot(1, 3, 3)
+    for bin_name, mses_prop in grouped_mses_prop.items():
+        steps, mse_values = zip(*mses_prop)  # Unzip steps and MSE values
+        plt.plot(steps, mse_values, marker='o', label=bin_name)  # Plot each bin
+        
+    plt.title("MSE Proportion Across Bins Over Steps")
+    plt.xlabel("Training Steps")
+    plt.ylabel("Average MSE Proportion Loss")
+    plt.ylim(0,2)
     plt.grid()
+    plt.xticks(rotation=45)
     plt.legend()
 
     plt.tight_layout()
-    plt.savefig(f"{savestr}/LPN_loss.png",
-                dpi=300,
-                bbox_inches="tight")
+    plt.savefig(f"{savestr}/LPN_loss.png", dpi=300, bbox_inches="tight")
+    plt.show()
 
 
 class Validator:
     """Class for validation."""
 
-    def __init__(self, dataloader, sigma_noise, logger=None):
+    def __init__(self, dataloader, sigma, logger=None):
         self.dataloader = dataloader
-        assert type(sigma_noise) == float
-        self.sigma_noise = sigma_noise
         self.logger = logger
+        self.sigma = sigma
+        self.bin_results = {sigma: []}
 
-    def _validate(self, model, loss_hparams):
+    def _validate(self, model, loss_hparams, gamma_fix):
         """Validate the model on the validation dataset."""
         model.eval()
         device = next(model.parameters()).device
 
-        batch = next(iter(self.dataloader))
-        target = torch.tensor(batch).unsqueeze(1).to(device)
-        noise = torch.randn_like(target)
-        input = target + noise * self.sigma_noise
+        sigma = self.sigma
+        for step, batch in enumerate(self.dataloader):
+            target = torch.tensor(batch).unsqueeze(1).to(device)
+            noise = torch.randn_like(target)
+            input = target + noise * sigma  
+            noise_levels = torch.full((target.size(0),1), sigma).to(device)
 
-        output = model(input)
+            output = model(input)
+    
+            loss_func = get_loss(loss_hparams)
 
-        loss_func = get_loss(loss_hparams)
+            if loss_hparams["type"] == "prox_matching":
+                loss = loss_func(output, target, noise_levels, gamma_fix).item()
+            else:
+                loss = loss_func(output, target).item()
 
-        loss = loss_func(output, target).item()
-        loss_mse = torch.mean((output - target) ** 2).item()
+            loss_mse = torch.mean((output - target) ** 2).item()
+            loss_mse_prop = loss_mse / sigma**2
 
-        self.loss = loss
-        self.loss_mse = loss_mse
+            self.bin_results[sigma].append({
+                "loss": loss,
+                "loss_mse": loss_mse,
+                "loss_mse_prop": loss_mse_prop
+            })
     
     def _log(self, step, loss_monitor, loss_hparams):
+        sigma = self.sigma
+        avg_loss = np.mean([r['loss'] for r in self.bin_results[sigma]])
+        avg_loss_mse = np.mean([r['loss_mse'] for r in self.bin_results[sigma]])
+        avg_loss_mse_prop = np.mean([r['loss_mse_prop'] for r in self.bin_results[sigma]])
         if self.logger is not None:
-            self.logger.info(f"Validation at step {step}: PM loss: {self.loss}, MSE loss: {self.loss_mse}")
+            self.logger.info(f"Step {step}: Noise {sigma:.3f} - Avg Loss: {avg_loss}, Avg MSE: {avg_loss_mse}, Avg MSE Prop: {avg_loss_mse_prop}")
+
         loss_monitor.append({
             "step": step,
-            "loss": self.loss,
-            "loss_mse": self.loss_mse,
+            "val_noise": f"{sigma:.3f}",
+            "loss": avg_loss,
+            "loss_mse": avg_loss_mse,
+            "loss_mse_prop": avg_loss_mse_prop,
             "loss_type": loss_hparams["type"],
         })
 
-    def validate(self, model, loss_hparams, step, loss_monitor):
+        self.loss = avg_loss
+        self.loss_mse = avg_loss_mse
+        self.loss_mse_prop = avg_loss_mse_prop
+
+    def validate(self, model, loss_hparams, step, loss_monitor, gamma_fix):
         """Validate the model and log the metrics."""
 
-        self._validate(model, loss_hparams)
-        print(
-            f"Validation at step {step}: PM loss: {self.loss}, MSE loss: {self.loss_mse}"
-        )
+        self._validate(model, loss_hparams, gamma_fix)
         self._log(step, loss_monitor, loss_hparams)
+
         return self.loss_mse
 
 
@@ -322,10 +382,15 @@ class ExpDiracSrgt(nn.Module):
         super().__init__()
         self.gamma = gamma
 
-    def forward(self, input, target):
+    def forward(self, input, target, noise_levels, gamma_fix):
         """
         input, target: batch, *
+        noise_levels: (batch, 1)
         """
         bsize = input.shape[0]
         dist = (input - target).pow(2).reshape(bsize, -1).mean(1).sqrt()
-        return exp_func(dist, self.gamma).mean()
+        
+        if gamma_fix:
+            return exp_func(dist, self.gamma).mean()
+        else:
+            return exp_func(dist, self.gamma * noise_levels.squeeze(1)).mean()

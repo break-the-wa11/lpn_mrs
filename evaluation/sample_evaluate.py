@@ -50,7 +50,7 @@ def eval_sample(
                             sigma_min=sample_param['noise_min'],
                             sigma_max=sample_param['noise_max'],
                             max_iter=sample_param['max_iter'])
-    elif sample_param['model_name'] == 'LPN_cond':
+    elif sample_param['model_name'] == 'LPN_cond' or sample_param['model_name'] == 'LPN_cond_encode_nn':
         sample = LPN_cond_sample(data=true_sample,
                                  model=model,
                                  device=device,
