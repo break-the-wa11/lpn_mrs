@@ -7,31 +7,25 @@ def get_denoise_hyperparameters():
         {
             "perturb_mode": "gaussian",
             "parameters": {
-                "sigma": 0.001
+                "sigma": 0.05,
             }
         },
         {
             "perturb_mode": "gaussian",
             "parameters": {
-                "sigma": 0.005
+                "sigma": 0.1,
             }
         },
         {
             "perturb_mode": "gaussian",
             "parameters": {
-                "sigma": 0.01
+                "sigma": 0.15,
             }
         },
         {
             "perturb_mode": "gaussian",
             "parameters": {
-                "sigma": 0.05
-            }
-        },
-        {
-            "perturb_mode": "gaussian",
-            "parameters": {
-                "sigma": 0.1
+                "sigma": 0.2,
             }
         }
     ]

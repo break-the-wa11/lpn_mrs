@@ -21,9 +21,9 @@ def lpn_cond_training(
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
     num_steps: int = 40000,
     optimizer: str = "adam",
-    sigma_noise: tuple = (0.001, 0.1),
+    sigma_noise: tuple = (0.04, 0.13),
     validate_every_n_steps: int = 1000,
-    validate_noise: list = [0.001, 0.01, 0.1],
+    validate_noise: list = [0.04, 0.1, 0.13],
     num_steps_pretrain: int = 20000,
     num_stages: int = 4,
     gamma_init: float = 0.1,
@@ -430,4 +430,4 @@ class ExpDiracSrgt(nn.Module):
         if gamma_fix:
             return exp_func(dist, self.gamma).mean()
         else:
-            return exp_func(dist, self.gamma * noise_levels.squeeze(1)).mean()
+            return exp_func(dist, self.gamma / 0.1 * noise_levels.squeeze(1)).mean()

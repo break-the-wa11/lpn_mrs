@@ -28,6 +28,12 @@ parser.add_argument(
     help="Root directory of raw dataset.",
 )
 parser.add_argument(
+    "--data_type",
+    type=str,
+    default="low_lipid",
+    help="Type of data to be denoised. Choose from ['clean', 'baseline', 'low_lipid', 'borderline_lipid', 'high_lipid'].",
+)
+parser.add_argument(
     "--model_name",
     type=str,
     default="LPN"
@@ -36,13 +42,13 @@ parser.add_argument(
     "--kernel", type=int, default=3, help="Kernel size for LPN layer."
 )
 parser.add_argument(
-    "--hidden", type=int, default=30, help="Hidden dim for LPN layer."
+    "--hidden", type=int, default=32, help="Hidden dim for LPN layer."
 )
 parser.add_argument(
-    "--noise_min", type=float, default=0.001, help="Min noise level during training"
+    "--noise_min", type=float, default=0.05, help="Min noise level during training"
 )
 parser.add_argument(
-    "--noise_max", type=float, default=0.1, help="Max noise level during training"
+    "--noise_max", type=float, default=0.2, help="Max noise level during training"
 )
 parser.add_argument(
     "--n_samples", 
@@ -56,11 +62,13 @@ args = parser.parse_args()
 data_dir = args.data_dir
 model_name = args.model_name
 n_samples = args.n_samples
+data_type = args.data_type
 
 if model_name == "LPN":
+    assert args.noise_min == args.noise_max, f'Only one noise level is required for LPN'
     kernel = args.kernel
     hidden = args.hidden
-    savestr = f"savings/lpn_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})"
+    savestr = f"savings/lpn_mrs_h_{args.hidden}_k_{args.kernel}_n_{args.noise_min}"
     model = LPN(
         in_dim=1,
         hidden=hidden,
@@ -68,7 +76,7 @@ if model_name == "LPN":
         beta=10,
         alpha=1e-6
     )
-    model.load_state_dict(torch.load(f"weights/lpn_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})/LPN_best.pt"))
+    model.load_state_dict(torch.load(f"weights/lpn_mrs_h_{args.hidden}_k_{args.kernel}_n_{args.noise_min}/LPN_best.pt"))
 elif model_name == "LPN_cond":
     kernel = args.kernel
     hidden = args.hidden
@@ -132,6 +140,7 @@ eval_denoise(
     model_type=model_name,
     device=device,
     n_samples=n_samples,
+    data_type=data_type,
     data_dir=data_dir,
     savestr=f"{savestr}/denoise/",
     logger=logger

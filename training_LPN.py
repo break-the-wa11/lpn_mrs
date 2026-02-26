@@ -49,24 +49,22 @@ parser.add_argument(
     "--hidden", type=int, default=30, help="Hidden dim for LPN layer."
 )
 parser.add_argument(
-    "--noise_min", type=float, default=0.001, help="Min Noise level for training"
+    "--noise_min", type=float, default=0.05, help="Min Noise level for training"
 )
 parser.add_argument(
-    "--noise_max", type=float, default=0.1, help="Max Noise level for training"
+    "--noise_max", type=float, default=0.2, help="Max Noise level for training"
 )
 parser.add_argument(
-    "--gamma_fix", type=bool, default=True, help="Whether to fix gamma during training"
+    "--gamma_adapt", 
+    action='store_false', 
+    dest='gamma_fix',   # This saves the result directly into 'gamma_fix'
+    default=True, 
+    help="If specified, gamma becomes adaptive; otherwise it is fixed."
 )
 parser.add_argument("--batch_size", type=int, default=None)
 args = parser.parse_args()
 
 ###############################################################################
-savestr = f"weights/{args.model_name.lower()}_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})"
-if not os.path.isdir("weights"):
-    os.mkdir("weights")
-if not os.path.isdir(savestr):
-    os.mkdir(savestr)
-
 model_name = args.model_name
 data_type = args.data_type
 kernel = args.kernel
@@ -77,6 +75,19 @@ gamma_fix = args.gamma_fix
 batch_size = 64 if args.batch_size is None else args.batch_size
 hyper_params = get_LPN_hyperparameters()
 
+if model_name == 'LPN':
+    assert noise_min == noise_max, f'Only one noise level is required for training LPN'
+    savestr = f"weights/lpn_mrs_h_{args.hidden}_k_{args.kernel}_n_{args.noise_min}"
+else:
+    savestr = f"weights/{args.model_name.lower()}_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})"
+
+if not gamma_fix:
+    savestr = f"{savestr}_gamma"
+
+if not os.path.isdir("weights"):
+    os.mkdir("weights")
+if not os.path.isdir(savestr):
+    os.mkdir(savestr)
 ###############################################################################
 # Create dataset and dataloaders
 train_dataset = MRSDataset(args.data_dir, split="train", data_type=data_type)
@@ -100,7 +111,7 @@ val_dataloader = torch.utils.data.DataLoader(
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
-    filename=f"{savestr}/log_training_{args.model_name.lower()}_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})_" + str(datetime.datetime.now()) + ".log",
+    filename=f"{savestr}/log_training_{savestr[8:]}_" + str(datetime.datetime.now()) + ".log",
     level=logging.INFO,
     format="%(asctime)s: %(message)s",
 )
@@ -123,7 +134,7 @@ if model_name == 'LPN':
         train_dataloader=train_dataloader,
         val_dataloader=val_dataloader,
         device=device,
-        sigma_noise= noise_max,
+        sigma_noise= noise_min,
         num_steps=hyper_params.num_steps,
         validate_every_n_steps=hyper_params.validate_every_n_steps,
         num_steps_pretrain=hyper_params.num_steps_pretrain,

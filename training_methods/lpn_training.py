@@ -20,7 +20,7 @@ def lpn_training(
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
     num_steps: int = 40000,
     optimizer: str = "adam",
-    sigma_noise: float = 0.01,
+    sigma_noise: float = 0.1,
     validate_every_n_steps: int = 1000,
     num_steps_pretrain: int = 20000,
     num_stages: int = 4,
@@ -233,6 +233,7 @@ def plot_loss(loss_monitor, savestr):
     plt.title("MSE Across Bins Over Steps")
     plt.xlabel("Training Steps")
     plt.ylabel("Average MSE Loss")
+    plt.ylim(0,0.002)
     plt.grid()
     plt.xticks(rotation=45)
     plt.legend()
@@ -246,7 +247,7 @@ def plot_loss(loss_monitor, savestr):
     plt.title("MSE Proportion Across Bins Over Steps")
     plt.xlabel("Training Steps")
     plt.ylabel("Average MSE Proportion Loss")
-    plt.ylim(0,2)
+    plt.ylim(0,1)
     plt.grid()
     plt.xticks(rotation=45)
     plt.legend()

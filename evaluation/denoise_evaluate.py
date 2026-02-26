@@ -10,14 +10,14 @@ import random
 
 from datasets import MRSDataset
 from evaluation.denoise import wv_denoise, lpn_denoise, lpn_cond_denoise
-from evaluation.prior import perturb_generator
-from hyperparameters import get_denoise_hyperparameters, get_wv_hyperparameters
+from hyperparameters import get_wv_hyperparameters
 
 def eval_denoise(
     model,
     model_type,
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
     n_samples: int = 30,
+    data_type: str = "low_lipid", 
     data_dir: str = "data/",
     savestr: str = "savings",
     logger=None,
@@ -35,69 +35,143 @@ def eval_denoise(
     """
     os.makedirs(savestr, exist_ok=True)
 
-    dataset = MRSDataset(root=data_dir, split='validate', data_type='low_lipid')
-    n_samples = min(n_samples, len(dataset))
-    random_indices = random.sample(range(len(dataset)), n_samples)
+    dataset_mrs = MRSDataset(root=data_dir, split='test', data_type=data_type)
 
-    gt = np.array([dataset[idx] for idx in random_indices])
-    np.save(f"{savestr}/gt.npy", gt)
+    model_cols = {}
+    wv_cols = {}
 
-    model.eval()
-    model = model.to(device)
+    # list sigma folders under data_dir/noise/data_type, parse as float and sort
+    sigma_root = os.path.join(data_dir, 'noise', data_type)
+    if not os.path.isdir(sigma_root):
+        raise FileNotFoundError(f"Noise folder not found: {sigma_root}")
 
-    hyp_list = get_denoise_hyperparameters()
-    thresh_dict = get_wv_hyperparameters()
+    sigma_names = []
+    for name in os.listdir(sigma_root):
+        full = os.path.join(sigma_root, name)
+        if not os.path.isdir(full):
+            continue
+        try:
+            float(name)  # ensure numeric folder name
+            sigma_names.append(name)
+        except ValueError:
+            # skip non-numeric folder names
+            continue
 
-    wv_imp_list = []
-    model_imp_list = []
-    sigma_list = []
+    # sort numerically
+    sigma_names = sorted(sigma_names, key=lambda s: float(s))
 
-    for hyp in hyp_list:
-        if hyp['perturb_mode'] == 'gaussian':
-            sigma = hyp['parameters']['sigma']
-            x_noisy = gt + np.random.normal(0, sigma, gt.shape)
+    for sigma in sigma_names:
+        try:
+            dataset_noise = MRSDataset(root=data_dir, split='noise', data_type=f"{data_type}/{sigma}")
+        except Exception as e:
+            if logger is not None:
+                logger.warning(f"Skipping sigma {sigma}: cannot create dataset: {e}")
+            continue
 
-            thresh = thresh_dict[sigma]
+        n = min(n_samples, len(dataset_mrs))
+        if n <= 0:
+            if logger is not None:
+                logger.warning(f"Skipping sigma {sigma}: no samples available (n={n})")
+            continue
 
+        gt = np.array([dataset_mrs[idx] for idx in range(n)])
+        noise = np.array([dataset_noise[idx] for idx in range(n)])
+        x_noisy = gt + noise
+
+        model.eval()
+        model = model.to(device)
+        
+        thresh_dict = get_wv_hyperparameters()
+        if sigma not in thresh_dict:
+            if logger is not None:
+                logger.warning(f"No threshold for sigma {sigma}, skipping")
+            continue
+        thresh = thresh_dict[sigma]
+
+        # denoise with wavelet
+        try:
             y_wv = wv_denoise(x_noisy, threshold_factor=thresh)
+            # ensure y_wv is numpy
+            y_wv = np.asarray(y_wv)
+        except Exception as e:
+            if logger is not None:
+                logger.warning(f"Wavelet denoise failed for sigma {sigma}: {e}")
+            continue
 
+        try:
+            x_tensor = torch.tensor(x_noisy).unsqueeze(1).to(device)
             if model_type == 'LPN':
-                x_tensor = torch.tensor(x_noisy).unsqueeze(1).to(device)
-                y_model = lpn_denoise(x_tensor, model)
-            elif model_type == 'LPN_cond' or model_type == 'LPN_cond_encode_nn':
-                x_tensor = torch.tensor(x_noisy).unsqueeze(1).to(device)
+                y_model_t = lpn_denoise(x_tensor, model)
+            elif model_type in ('LPN_cond', 'LPN_cond_encode_nn'):
                 b = x_tensor.size(0)
-                noise_levels = torch.full((b,1), sigma).to(device)
-                y_model = lpn_cond_denoise(x_tensor, model, noise_levels)
+                noise_levels = torch.full((b, 1), float(sigma)).to(device)
+                y_model_t = lpn_cond_denoise(x_tensor, model, noise_levels)
             elif model_type == 'GLOW':
-                pass
+                # placeholder: implement as needed
+                raise NotImplementedError("GLOW denoiser not implemented here")
+            else:
+                raise NotImplementedError(f"Unknown model type: {model_type}")
 
+            # ensure numpy arrays for comparisons
+            if isinstance(y_model_t, torch.Tensor):
+                y_model = y_model_t.detach().cpu().numpy()
+            else:
+                y_model = np.asarray(y_model_t)
+
+        except Exception as e:
+            if logger is not None:
+                logger.warning(f"Model denoise failed for sigma {sigma}: {e}")
+            continue
+
+        # compute mse arrays
+        try:
             mse = np.mean((x_noisy - gt) ** 2, axis=1)
             mse_model = np.mean((y_model - gt) ** 2, axis=1)
             mse_wv = np.mean((y_wv - gt) ** 2, axis=1)
-
-            wv_improvement = mse_wv / mse
-            model_improvement = mse_model / mse
-
+        except Exception as e:
             if logger is not None:
-                logger.info(
-                    f"Gaussian {sigma} denoise: "
-                )
-                logger.info(
-                    f"wavelet improvement: {wv_improvement}, {model_type} improvement: {model_improvement}"
-                )
+                logger.warning(f"Error computing MSE for sigma {sigma}: {e}")
+            continue
 
-            wv_imp_list.append(wv_improvement)
-            model_imp_list.append(model_improvement)
-            sigma_list.append(sigma)
+        # verify shapes
+        if not (mse.shape[0] == mse_model.shape[0] == mse_wv.shape[0] == n):
+            if logger is not None:
+                logger.warning(f"Shape mismatch for sigma {sigma}: mse {mse.shape}, model {mse_model.shape}, wv {mse_wv.shape}")
+            continue
 
-            os.makedirs(f'{savestr}/{sigma}/', exist_ok=True)
+        wv_improvement = mse_wv / mse
+        model_improvement = mse_model / mse
 
-            np.save(f'{savestr}/{sigma}/x_noisy.npy', x_noisy)
-            np.save(f'{savestr}/{sigma}/y_wv.npy', y_wv)
-            np.save(f'{savestr}/{sigma}/y_{model_type}.npy', y_model)
+        if logger is not None:
+            logger.info(
+                f"Gaussian {sigma} denoise: "
+            )
+            logger.info(
+                f"wavelet improvement: {wv_improvement}, {model_type} improvement: {model_improvement}"
+            )
 
-    df_model = pd.DataFrame(np.array(model_imp_list).T, columns=sigma_list)
-    df_wv = pd.DataFrame(np.array(wv_imp_list).T, columns=sigma_list)
-    df_model.to_csv(f"{savestr}/{model_type}_denoise.csv", index=False)
-    df_wv.to_csv(f"{savestr}/wv_denoise.csv", index=False)
+        # save per-sigma arrays and denoised results
+        out_dir = os.path.join(savestr, sigma)
+        os.makedirs(out_dir, exist_ok=True)
+        np.save(os.path.join(out_dir, 'x_noisy.npy'), x_noisy)
+        np.save(os.path.join(out_dir, 'y_wv.npy'), y_wv)
+        np.save(os.path.join(out_dir, f'y_{model_type}.npy'), y_model)
+
+        # store columns keyed by sigma (string)
+        model_cols[sigma] = model_improvement
+        wv_cols[sigma] = wv_improvement
+
+    # After loop, build dataframes if we have any columns
+    if model_cols:
+        df_model = pd.DataFrame(model_cols)
+        df_model.to_csv(os.path.join(savestr, f"{model_type}_denoise.csv"), index=False)
+    else:
+        if logger is not None:
+            logger.warning("No model columns to save")
+
+    if wv_cols:
+        df_wv = pd.DataFrame(wv_cols)
+        df_wv.to_csv(os.path.join(savestr, "wv_denoise.csv"), index=False)
+    else:
+        if logger is not None:
+            logger.warning("No wavelet columns to save")
