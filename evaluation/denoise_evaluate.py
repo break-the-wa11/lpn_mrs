@@ -19,7 +19,10 @@ def eval_denoise(
     n_samples: int = 30,
     data_type: str = "low_lipid", 
     data_dir: str = "data/",
-    savestr: str = "savings",
+    savestr: str = "savings/model_name/denoise/",
+    wv_savestr: str = "savings/wv/denoise/",
+    osprey_savestr: str = "savings/osprey/denoise/",
+    global_savestr: str = "savings/denoise/",
     logger=None,
 ):
     """
@@ -30,15 +33,30 @@ def eval_denoise(
         device: Device to run the evaluation on.
         n_samples: number of samples to evaluate.
         data_dir: str, directory of raw test_data.
-        savestr: Directory to save the denoised results.
+        savestr: Directory to save the denoised results of the model.
+        wv_savestr: Directory to save the denoised results of wavelet denoising.
+        osprey_savestr: Directory to save the denoised results of osprey fitting.
+        global_savestr: Directory to save global results like noisy signals.
         logger: Logger for logging evaluation progress.
     """
+    os.makedirs(global_savestr, exist_ok=True)
     os.makedirs(savestr, exist_ok=True)
+    os.makedirs(wv_savestr, exist_ok=True)
+    os.makedirs(osprey_savestr, exist_ok=True)
 
     dataset_mrs = MRSDataset(root=data_dir, split='test', data_type=data_type)
 
+    n = min(n_samples, len(dataset_mrs))
+    if n <= 0:
+        if logger is not None:
+            logger.warning(f"no samples available (n={n})")
+
+    gt = np.array([dataset_mrs[idx] for idx in range(n)])
+    np.save(os.path.join(global_savestr, 'gt.npy'), gt)
+    
     model_cols = {}
     wv_cols = {}
+    osprey_cols = {}
 
     # list sigma folders under data_dir/noise/data_type, parse as float and sort
     sigma_root = os.path.join(data_dir, 'noise', data_type)
@@ -63,18 +81,12 @@ def eval_denoise(
     for sigma in sigma_names:
         try:
             dataset_noise = MRSDataset(root=data_dir, split='noise', data_type=f"{data_type}/{sigma}")
+            dataset_osprey = MRSDataset(root=data_dir, split='osprey_denoised', data_type=f"{data_type}/{sigma}")
         except Exception as e:
             if logger is not None:
                 logger.warning(f"Skipping sigma {sigma}: cannot create dataset: {e}")
             continue
 
-        n = min(n_samples, len(dataset_mrs))
-        if n <= 0:
-            if logger is not None:
-                logger.warning(f"Skipping sigma {sigma}: no samples available (n={n})")
-            continue
-
-        gt = np.array([dataset_mrs[idx] for idx in range(n)])
         noise = np.array([dataset_noise[idx] for idx in range(n)])
         x_noisy = gt + noise
 
@@ -97,6 +109,9 @@ def eval_denoise(
             if logger is not None:
                 logger.warning(f"Wavelet denoise failed for sigma {sigma}: {e}")
             continue
+
+        # denoise with osprey
+        y_osprey = np.array([dataset_osprey[idx] for idx in range(n)])
 
         try:
             x_tensor = torch.tensor(x_noisy).unsqueeze(1).to(device)
@@ -128,18 +143,20 @@ def eval_denoise(
             mse = np.mean((x_noisy - gt) ** 2, axis=1)
             mse_model = np.mean((y_model - gt) ** 2, axis=1)
             mse_wv = np.mean((y_wv - gt) ** 2, axis=1)
+            mse_osprey = np.mean((y_osprey - gt) ** 2, axis=1)
         except Exception as e:
             if logger is not None:
                 logger.warning(f"Error computing MSE for sigma {sigma}: {e}")
             continue
 
         # verify shapes
-        if not (mse.shape[0] == mse_model.shape[0] == mse_wv.shape[0] == n):
+        if not (mse.shape[0] == mse_model.shape[0] == mse_wv.shape[0] == mse_osprey.shape[0] == n):
             if logger is not None:
                 logger.warning(f"Shape mismatch for sigma {sigma}: mse {mse.shape}, model {mse_model.shape}, wv {mse_wv.shape}")
             continue
 
         wv_improvement = mse_wv / mse
+        osprey_improvement = mse_osprey / mse
         model_improvement = mse_model / mse
 
         if logger is not None:
@@ -147,19 +164,27 @@ def eval_denoise(
                 f"Gaussian {sigma} denoise: "
             )
             logger.info(
-                f"wavelet improvement: {wv_improvement}, {model_type} improvement: {model_improvement}"
+                f"wavelet improvement: {wv_improvement}, osprey improvement: {osprey_improvement}, {model_type} improvement: {model_improvement}"
             )
 
         # save per-sigma arrays and denoised results
-        out_dir = os.path.join(savestr, sigma)
-        os.makedirs(out_dir, exist_ok=True)
-        np.save(os.path.join(out_dir, 'x_noisy.npy'), x_noisy)
-        np.save(os.path.join(out_dir, 'y_wv.npy'), y_wv)
-        np.save(os.path.join(out_dir, f'y_{model_type}.npy'), y_model)
+        noisy_dir = os.path.join(global_savestr, sigma)
+        wv_dir = os.path.join(wv_savestr, sigma)
+        osprey_dir = os.path.join(osprey_savestr, sigma)
+        model_dir = os.path.join(savestr, sigma)
+        os.makedirs(noisy_dir, exist_ok=True)
+        os.makedirs(wv_dir, exist_ok=True)
+        os.makedirs(osprey_dir, exist_ok=True)
+        os.makedirs(model_dir, exist_ok=True)
+        np.save(os.path.join(noisy_dir, 'x_noisy.npy'), x_noisy)
+        np.save(os.path.join(wv_dir, 'y_wv.npy'), y_wv)
+        np.save(os.path.join(osprey_dir, 'y_osprey.npy'), y_osprey)
+        np.save(os.path.join(model_dir, f'y_{model_type}.npy'), y_model)
 
         # store columns keyed by sigma (string)
         model_cols[sigma] = model_improvement
         wv_cols[sigma] = wv_improvement
+        osprey_cols[sigma] = osprey_improvement
 
     # After loop, build dataframes if we have any columns
     if model_cols:
@@ -171,7 +196,14 @@ def eval_denoise(
 
     if wv_cols:
         df_wv = pd.DataFrame(wv_cols)
-        df_wv.to_csv(os.path.join(savestr, "wv_denoise.csv"), index=False)
+        df_wv.to_csv(os.path.join(wv_savestr, "wv_denoise.csv"), index=False)
     else:
         if logger is not None:
             logger.warning("No wavelet columns to save")
+
+    if osprey_cols:
+        df_osprey = pd.DataFrame(osprey_cols)
+        df_osprey.to_csv(os.path.join(osprey_savestr, "osprey_denoise.csv"), index=False)
+    else:
+        if logger is not None:
+            logger.warning("No osprey columns to save")

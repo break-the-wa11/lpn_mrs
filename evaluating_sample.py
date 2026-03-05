@@ -40,10 +40,10 @@ parser.add_argument(
     "--hidden", type=int, default=30, help="Hidden dim for LPN layer."
 )
 parser.add_argument(
-    "--noise_min", type=float, default=0.001, help="Min noise level during training"
+    "--noise_min", type=float, default=0.05, help="Min noise level during training"
 )
 parser.add_argument(
-    "--noise_max", type=float, default=0.1, help="Max noise level during training"
+    "--noise_max", type=float, default=0.2, help="Max noise level during training"
 )
 parser.add_argument(
     "--max_iter", type=int, default=500, help="Number of steps for sampling"
@@ -87,7 +87,7 @@ elif model_name == "LPN_cond":
     noise_min = args.noise_min
     noise_max = args.noise_max
     max_iter = args.max_iter
-    savestr = f"savings/lpn_cond_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})_gamma"
+    savestr = f"savings/lpn_cond_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})"
     model = LPN_cond(
         in_dim=1,
         hidden_c=1,
@@ -96,7 +96,7 @@ elif model_name == "LPN_cond":
         beta=10,
         alpha=1e-6
     )
-    model.load_state_dict(torch.load(f"weights/lpn_cond_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})_gamma/LPN_best.pt"))
+    model.load_state_dict(torch.load(f"weights/lpn_cond_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})/LPN_best.pt"))
     sample_param = {'model_name': model_name,
                    'noise_min': noise_min,
                    'noise_max': noise_max,
@@ -108,7 +108,7 @@ elif model_name == "LPN_cond_encode_nn":
     noise_min = args.noise_min
     noise_max = args.noise_max
     max_iter = args.max_iter
-    savestr = f"savings/lpn_cond_encode_nn_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})_gamma"
+    savestr = f"savings/lpn_cond_encode_nn_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})"
     model = LPN_cond_encode_nn(
         in_dim=1,
         hidden_c=1,
@@ -117,7 +117,7 @@ elif model_name == "LPN_cond_encode_nn":
         beta=10,
         alpha=1e-6
     )
-    model.load_state_dict(torch.load(f"weights/lpn_cond_encode_nn_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})_gamma/LPN_best.pt"))
+    model.load_state_dict(torch.load(f"weights/lpn_cond_encode_nn_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})/LPN_best.pt"))
     sample_param = {'model_name': model_name,
                    'noise_min': noise_min,
                    'noise_max': noise_max,

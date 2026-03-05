@@ -240,7 +240,7 @@ def invert(x, model, inv_alg, sigma = 0.01, **kwargs):
         raise ValueError("Unknown inversion algorithm:", inv_alg)
     
 
-def eval_lpn_cond_prior(x, model, inv_alg, sigma = 0.01, **kwargs):
+def eval_lpn_cond_prior(x, model, inv_alg, sigma = 0.1, **kwargs):
     """
     Evaluate the learned prior at x.
 

@@ -26,16 +26,12 @@ def perturb_generator(n_samples, perturb_arg, raw_data_dir, save_dir):
         dataset = MRSDataset(root=raw_data_dir, split='test', data_type=perturb_arg['perturb_mode'])
 
         n_samples = min(n_samples, len(dataset))
-        random_indices = random.sample(range(len(dataset)), n_samples)
 
-        samples = []
-        for idx in random_indices:
-            samples.append(dataset[idx])
-
+        samples = [dataset[idx] for idx in range(n_samples)]
         samples = np.array(samples).astype(np.float32)
         np.save(os.path.join(save_dir, f"{perturb_arg['perturb_mode']}.npy"), samples)
     elif perturb_arg['perturb_mode'] == 'gaussian':
-        dataset = MRSDataset(root=raw_data_dir, split='test', data_type='clean')
+        dataset = MRSDataset(root=raw_data_dir, split='test', data_type='low_lipid')
         n_samples = min(n_samples, len(dataset))
         random_indices = random.sample(range(len(dataset)), n_samples)
 
