@@ -1,0 +1,42 @@
+[project]
+name = "lpn-mrs"
+version = "0.1.0"
+requires-python = ">=3.9"
+dependencies = [
+    "h5py>=3.14.0",
+    "jupyter>=1.1.1",
+    "jupyterlab>=4.5.6",
+    "matplotlib>=3.9.4",
+    "numpy>=2.0.2",
+    "opencv-python>=4.13.0.92",
+    "pandas>=2.3.3",
+    "pytorch-lightning>=2.6.0",
+    "pywavelets>=1.6.0",
+    "pyyaml>=6.0.3",
+    "scikit-image>=0.24.0",
+    "scikit-learn>=1.6.1",
+    "scipy>=1.13.1",
+    "tensorboard>=2.20.0",
+    "torch>=2.6.0",
+    "tqdm>=4.67.3",
+]
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cpu", marker = "sys_platform != 'linux'" },
+  { index = "pytorch-cu128", marker = "sys_platform == 'linux'" },
+]
+torchvision = [
+  { index = "pytorch-cpu", marker = "sys_platform != 'linux'" },
+  { index = "pytorch-cu128", marker = "sys_platform == 'linux'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true

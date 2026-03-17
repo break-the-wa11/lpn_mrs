@@ -4,6 +4,31 @@ import numpy as np
 import torch
 from torch import nn
 
+def sigma_encoding(sigma, d_model):
+    """
+    Generate positional encoding for given sigma.
+    
+    Args:
+        sigma: tensor of scalar values. (b)
+        d_model: the dimensionality of the output vector (length of positional encoding).
+    
+    Returns:
+        Tensor of shape (b, d_model) containing the positional encodings.
+    """
+    sigma = sigma * 1000  # Scale sigma to a larger range for better encoding
+
+    # Create a positional encoding array
+    encoding = torch.zeros(sigma.size(0), d_model)
+
+    # Generate the positional encodings
+    for pos in range(sigma.size(0)):
+        for i in range(0, d_model, 2):
+            encoding[pos, i] = torch.sin(sigma[pos] / (10000 ** (i / d_model)))  # Even indices
+            if i + 1 < d_model:
+                encoding[pos, i + 1] = torch.cos(sigma[pos] / (10000 ** (i / d_model)))  # Odd indices
+
+    return encoding
+
 class LPN_cond_encode_nn(nn.Module):
     def __init__(
         self,
@@ -136,6 +161,52 @@ class LPN_cond_encode_nn(nn.Module):
 
         return z
     
+    def _init_weight_tilde(self, s_values=None):
+        """
+        Initialize self.weight_tilde[0] (nn.Linear(1, hidden_c*512)) so that
+        for sample sigmas the linear layer approximates sigma_encoding(sigma).
+
+        s_values: iterable of sigma scalars to fit (if None, choose [0.05,0.1,0.15,0.2])
+        """
+        linear = self.weight_tilde[0]
+        out_dim = linear.out_features  # hidden_c * 512
+        in_dim = linear.in_features    # should be 1
+
+        if s_values is None:
+            s_values = [0.05, 0.1, 0.15, 0.2]
+
+        # Build design matrix and targets
+        S = np.array(s_values, dtype=np.float64).reshape(-1, 1)  # shape (m,1)
+        m = S.shape[0]
+
+        # compute target encodings for each sigma using sigma_encoding
+        # sigma_encoding expects a torch tensor of shape (m,)
+        with torch.no_grad():
+            s_tensor = torch.tensor(S.reshape(-1), dtype=torch.float32)
+            enc = sigma_encoding(s_tensor, d_model=out_dim)  # returns (m, out_dim) tensor
+            T = enc.detach().cpu().numpy()  # shape (m, out_dim)
+
+        # We want linear(s) = W * s + b ≈ T
+        # Solve least squares for W (shape out_dim x 1) and b (out_dim,)
+        # Augment S with a column of ones for bias
+        A = np.concatenate([S, np.ones((m,1), dtype=np.float64)], axis=1)  # (m,2)
+        # Solve for each output dimension separately: minimize ||A @ [W_i; b_i] - T[:,i]||^2
+        # We can compute solution in one shot using np.linalg.lstsq
+        # X shape (2, out_dim) where X = [W; b]^T
+        X, *_ = np.linalg.lstsq(A, T, rcond=None)  # returns (2, out_dim)
+        # X[0,:] are W row values, X[1,:] are biases
+
+        W = X[0, :].reshape(out_dim, in_dim)  # (out_dim,1)
+        b = X[1, :].reshape(out_dim)          # (out_dim,)
+
+        # assign to linear layer (convert to torch float32)
+        linear.weight.data = torch.tensor(W, dtype=torch.float32)
+        linear.bias.data = torch.tensor(b, dtype=torch.float32)
+
+        # optionally freeze this layer initially if you want fixed embedding
+        # for param in linear.parameters():
+        #     param.requires_grad = False
+
     def init_weights(self, mean, std):
         print("init weights")
         with torch.no_grad():
@@ -143,6 +214,7 @@ class LPN_cond_encode_nn(nn.Module):
                 core.weight.data.normal_(mean, std).exp_()
             for core in self.weight_y:
                 core.weight.data.normal_(mean, std).exp_()
+            self._init_weight_tilde(s_values=[0.05,0.1,0.15,0.2])
 
     # this clips the weights to be non-negative to preserve convexity
     def wclip(self):

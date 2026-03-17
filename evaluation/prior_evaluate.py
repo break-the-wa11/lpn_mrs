@@ -7,13 +7,14 @@ import torch
 import numpy as np
 import pandas as pd
 
-from evaluation.prior import eval_lpn_prior, eval_lpn_cond_prior
+from evaluation.prior import eval_lpn_prior
 from datasets import MRSDataset
 
 def eval_prior(
     model,
     model_param,
     inv_alg: str = 'cvx_cg',
+    maxiter: int = 200,
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
     n_samples: int = 30,
     data_type: str = "low_lipid",
@@ -27,6 +28,7 @@ def eval_prior(
     Args:
         model_param: dict containing model-specific parameters
         inv_alg: Inversion algorithm only for LPN, choose from ['ls', 'cvx_cg', 'cvx_gd']
+        max_iter: Max iter for LPN inversion.
         device: Device to run the evaluation on.
         n_samples: number of samples to evaluate.
         data_type: data type to add gaussian noise on.
@@ -39,8 +41,9 @@ def eval_prior(
     model_name = model_param['model_name']
 
     samples = {}
+    pm_list = ['clean', 'baseline', 'low_lipid', 'borderline_lipid', 'high_lipid']
 
-    for perturb_mode in ['clean', 'baseline', 'low_lipid', 'borderline_lipid', 'high_lipid']:
+    for perturb_mode in pm_list:
         dataset = MRSDataset(root=raw_data_dir, split='test', data_type=perturb_mode)
         n_samples = min(n_samples, len(dataset))
         samples[perturb_mode] = np.array([dataset[id] for id in range(n_samples)])
@@ -52,10 +55,21 @@ def eval_prior(
         noise = np.array([dataset_noise[id] for id in range(len(gt))])
         samples[sigma] = gt + noise       
 
+    sigmas = []
+    for k in samples.keys():
+        if k not in pm_list:
+            try:
+                float(k)  # only keep keys that parse as numeric
+                sigmas.append(k)
+            except Exception:
+                pass
+    sigmas_sorted = sorted(sigmas, key=lambda s: float(s))
+    ordered_keys = [k for k in pm_list if k in samples] + sigmas_sorted
+
     p_list = []
-    for pm in samples.keys():
+    for pm in ordered_keys:
         sample = samples[pm]
-        batch = torch.tensor(sample).unsqueeze(1).to(device)
+        batch = torch.tensor(sample, device=device).unsqueeze(1)
 
         if model_name == "GLOW":
             p = model.log_prob(batch).detach().cpu().numpy()
@@ -64,7 +78,7 @@ def eval_prior(
                 logger.info(f"Mode: {pm} | {model_name} log_prob: {p}")
 
         elif model_name == "LPN":
-            p, y, fy = eval_lpn_prior(batch, model, inv_alg=inv_alg)
+            p, y, fy = eval_lpn_prior(batch, model, inv_alg=inv_alg, sigma=None, maxiter=maxiter, logger = logger, save_mse_path = f"{savestr}/mse_{pm}.csv")
             p_list.append({'pm': pm, 'p': p, 's': None})
             if logger is not None:
                 logger.info(f"Mode: {pm} | {model_name} log_prob: {p}")
@@ -72,7 +86,7 @@ def eval_prior(
         elif model_name == "LPN_cond" or model_name == "LPN_cond_encode_nn":
             sigma_list = np.linspace(model_param["noise_min"], model_param["noise_max"], num=4)
             for s in sigma_list:
-                p, y, fy = eval_lpn_cond_prior(batch, model, inv_alg=inv_alg, sigma=s)
+                p, y, fy = eval_lpn_prior(batch, model, inv_alg=inv_alg, sigma=s, maxiter=maxiter, logger = logger, save_mse_path = f"{savestr}/mse_{pm}_{s:.2f}.csv")
                 p_list.append({'pm': pm, 'p': p, 's': s})
                 if logger is not None:
                     logger.info(f"Mode: {pm} | s: {s} | {model_name} log_prob: {p}")

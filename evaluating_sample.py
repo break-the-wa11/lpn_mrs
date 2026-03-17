@@ -46,7 +46,7 @@ parser.add_argument(
     "--noise_max", type=float, default=0.2, help="Max noise level during training"
 )
 parser.add_argument(
-    "--max_iter", type=int, default=500, help="Number of steps for sampling"
+    "--max_iter", type=int, default=50, help="Number of steps for sampling"
 )
 parser.add_argument(
     "--n_samples", 

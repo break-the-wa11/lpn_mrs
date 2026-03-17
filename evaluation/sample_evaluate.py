@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from evaluation.sample import compute_stat, fid, GMM_sample, LPN_sample, LPN_cond_sample, GLOW_sample
+from evaluation.sample import compute_stat, fid, GMM_sample, LPN_sample, GLOW_sample
 
 def eval_sample(
     model,
@@ -42,22 +42,25 @@ def eval_sample(
     if sample_param['model_name'] == 'GLOW':
         sample = GLOW_sample(n_samples, model)
     elif sample_param['model_name'] == 'LPN':
+        noise_schedule = []
+        noise_schedule.extend([sample_param['noise']]*sample_param['max_iter'])
         sample = LPN_sample(data=true_sample,
                             model=model,
                             device=device,
                             savestr=savestr,
                             n_samples=sample_param['n_samples'],
-                            sigma=sample_param['noise'],
-                            max_iter=sample_param['max_iter'])
+                            noise_schedule=noise_schedule,
+                            cond=False)
     elif sample_param['model_name'] == 'LPN_cond' or sample_param['model_name'] == 'LPN_cond_encode_nn':
-        sample = LPN_cond_sample(data=true_sample,
+        noise_schedule = []
+        noise_schedule.extend([0.15]*sample_param['max_iter'])
+        sample = LPN_sample(data=true_sample,
                                  model=model,
                                  device=device,
                                  savestr=savestr,
                                  n_samples=sample_param['n_samples'],
-                                 sigma_min=sample_param['noise_min'],
-                                 sigma_max=sample_param['noise_max'],
-                                 max_iter=sample_param['max_iter'])
+                                 noise_schedule=noise_schedule,
+                                 cond=True)
     else:
         raise ValueError(f"Unknown model type!")
     
