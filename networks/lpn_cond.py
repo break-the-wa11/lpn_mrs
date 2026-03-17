@@ -18,7 +18,7 @@ def sigma_encoding(sigma, d_model):
     sigma = sigma * 1000  # Scale sigma to a larger range for better encoding
 
     # Create a positional encoding array
-    encoding = torch.zeros(sigma.size(0), d_model)
+    encoding = torch.zeros(sigma.size(0), d_model, device=sigma.device)
 
     # Generate the positional encodings
     for pos in range(sigma.size(0)):

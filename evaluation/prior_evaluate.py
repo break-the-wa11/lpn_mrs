@@ -78,7 +78,7 @@ def eval_prior(
                 logger.info(f"Mode: {pm} | {model_name} log_prob: {p}")
 
         elif model_name == "LPN":
-            p, y, fy = eval_lpn_prior(batch, model, inv_alg=inv_alg, sigma=None, maxiter=maxiter, logger = logger, save_mse_path = f"{savestr}/mse_{pm}.csv")
+            p, y, fy = eval_lpn_prior(batch, model, inv_alg=inv_alg, sigma=None, maxiter=maxiter, logger = logger, save_path = f"{savestr}/mse_{pm}.csv")
             p_list.append({'pm': pm, 'p': p, 's': None})
             if logger is not None:
                 logger.info(f"Mode: {pm} | {model_name} log_prob: {p}")
@@ -86,7 +86,7 @@ def eval_prior(
         elif model_name == "LPN_cond" or model_name == "LPN_cond_encode_nn":
             sigma_list = np.linspace(model_param["noise_min"], model_param["noise_max"], num=4)
             for s in sigma_list:
-                p, y, fy = eval_lpn_prior(batch, model, inv_alg=inv_alg, sigma=s, maxiter=maxiter, logger = logger, save_mse_path = f"{savestr}/mse_{pm}_{s:.2f}.csv")
+                p, y, fy = eval_lpn_prior(batch, model, inv_alg=inv_alg, sigma=s, maxiter=maxiter, logger = logger, save_path = f"{savestr}/mse_{pm}_{s:.2f}.csv")
                 p_list.append({'pm': pm, 'p': p, 's': s})
                 if logger is not None:
                     logger.info(f"Mode: {pm} | s: {s} | {model_name} log_prob: {p}")

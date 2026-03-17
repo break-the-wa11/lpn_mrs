@@ -77,8 +77,9 @@ if model_name == "LPN":
         kernel=kernel,
         beta=10,
         alpha=1e-6
-    ).to(device)
+    )
     model.load_state_dict(torch.load(f"weights/lpn_mrs_h_{args.hidden}_k_{args.kernel}_n_{noise_min}/LPN_best.pt"))
+    model = model.to(device)
     model_param = {'model_name': model_name,
                    'noise': noise_min}
 elif model_name == "LPN_cond":
@@ -94,8 +95,9 @@ elif model_name == "LPN_cond":
         kernel=kernel,
         beta=10,
         alpha=1e-6
-    ).to(device)
+    )
     model.load_state_dict(torch.load(f"weights/lpn_cond_mrs_h_{args.hidden}_k_{args.kernel}_n_({noise_min}_{noise_max})/LPN_best.pt"))
+    model = model.to(device)
     model_param = {'model_name': model_name,
                    'noise_min': noise_min,
                    'noise_max': noise_max}
@@ -112,8 +114,9 @@ elif model_name == "LPN_cond_encode_nn":
         kernel=kernel,
         beta=10,
         alpha=1e-6
-    ).to(device)
+    )
     model.load_state_dict(torch.load(f"weights/lpn_cond_encode_nn_mrs_h_{args.hidden}_k_{args.kernel}_n_({args.noise_min}_{args.noise_max})/LPN_best.pt"))
+    model = model.to(device)
     model_param = {'model_name': model_name,
                    'noise_min': noise_min,
                    'noise_max': noise_max}
@@ -126,8 +129,9 @@ elif model_name == "GLOW":
         hidden_channels=32,
         split_mode='channel',
         scale=True,
-    ).to(device)
+    )
     model.load_state_dict(torch.load(f"weights/glow_mrs_1/GLOW_best.pt"))
+    model = model.to(device)
     model_param = {'model_name': model_name}
 else:
     raise ValueError("Unknown model!")
